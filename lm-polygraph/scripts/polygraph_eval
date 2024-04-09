@@ -278,6 +278,7 @@ def get_density_based_ue_methods(args, model_type):
         else:
             estimators += [
                 TokenMahalanobisDistance("decoder", parameters_path=parameters_path),
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path),
                 #MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
                 #RelativeMahalanobisDistanceSeq(
                 #    "decoder", parameters_path=parameters_path
