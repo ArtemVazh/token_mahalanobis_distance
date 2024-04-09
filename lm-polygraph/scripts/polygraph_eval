@@ -277,8 +277,28 @@ def get_density_based_ue_methods(args, model_type):
             ]
         else:
             estimators += [
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path),
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path),
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="mean"),
+                
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="sum"),
+                
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
+                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
+                
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="mean"),
+                
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="sum"),
+                
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
+                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
+                                
                 #MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
                 #RelativeMahalanobisDistanceSeq(
                 #    "decoder", parameters_path=parameters_path

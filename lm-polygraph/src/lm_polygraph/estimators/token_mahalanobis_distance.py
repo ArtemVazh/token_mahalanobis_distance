@@ -21,9 +21,10 @@ class TokenMahalanobisDistance(Estimator):
         parameters_path: str = None,
         normalize: bool = False,
         metric_thr: float = 0.0,
+        metric: str = "alignscore",
         aggregation: str = "mean"
     ):
-        super().__init__(["token_embeddings", "train_token_embeddings", "train_token_metrics"], "sequence")
+        super().__init__(["token_embeddings", "train_token_embeddings", "train_token_metrics", "train_token_accuracy"], "sequence")
         self.centroid = None
         self.sigma_inv = None
         self.parameters_path = parameters_path
@@ -34,9 +35,10 @@ class TokenMahalanobisDistance(Estimator):
         self.is_fitted = False
         self.metric_thr = metric_thr
         self.aggregation = aggregation
+        self.metric = metric
 
         if self.parameters_path is not None:
-            self.full_path = f"{self.parameters_path}/tmd_{self.embeddings_type}_{self.aggregation}_{self.metric_thr}"
+            self.full_path = f"{self.parameters_path}/tmd_{self.embeddings_type}_{self.aggregation}_{self.metric}_{self.metric_thr}"
             os.makedirs(self.full_path, exist_ok=True)
 
             if os.path.exists(f"{self.full_path}/centroid.pt"):
@@ -47,7 +49,7 @@ class TokenMahalanobisDistance(Estimator):
                 self.is_fitted = True
 
     def __str__(self):
-        return f"TokenMahalanobisDistance_{self.embeddings_type} ({self.aggregation}, {self.metric_thr})"
+        return f"TokenMahalanobisDistance_{self.embeddings_type} ({self.aggregation}, {self.metric}, {self.metric_thr})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         # take the embeddings
@@ -60,8 +62,19 @@ class TokenMahalanobisDistance(Estimator):
             train_embeddings = create_cuda_tensor_from_numpy(
                 stats[f"train_token_embeddings_{self.embeddings_type}"]
             )
-            train_token_metrics = np.array(stats["train_token_metrics"]).flatten()
-            train_embeddings = train_embeddings[train_token_metrics > self.metric_thr]
+            if self.metric == "alignscore":
+                train_token_metrics = np.array([
+                    x
+                    for xs in stats["train_token_metrics"]
+                    for x in xs
+                ])
+            else:
+                train_token_metrics = np.array([
+                    x
+                    for xs in stats["train_token_accuracy"]
+                    for x in xs
+                ])
+            train_embeddings = train_embeddings[train_token_metrics >= self.metric_thr]
             
             self.centroid = train_embeddings.mean(axis=0)
             if self.parameters_path is not None:
@@ -72,8 +85,19 @@ class TokenMahalanobisDistance(Estimator):
             train_embeddings = create_cuda_tensor_from_numpy(
                 stats[f"train_token_embeddings_{self.embeddings_type}"]
             )
-            train_token_metrics = np.array(stats["train_token_metrics"]).flatten()
-            train_embeddings = train_embeddings[train_token_metrics > self.metric_thr]
+            if self.metric == "alignscore":
+                train_token_metrics = np.array([
+                    x
+                    for xs in stats["train_token_metrics"]
+                    for x in xs
+                ])
+            else:
+                train_token_metrics = np.array([
+                    x
+                    for xs in stats["train_token_accuracy"]
+                    for x in xs
+                ])
+            train_embeddings = train_embeddings[train_token_metrics >= self.metric_thr]
             self.sigma_inv, _ = compute_inv_covariance(
                 self.centroid.unsqueeze(0), train_embeddings
             )

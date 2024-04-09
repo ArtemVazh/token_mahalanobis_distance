@@ -38,10 +38,11 @@ class RelativeTokenMahalanobisDistance(Estimator):
         parameters_path: str = None,
         normalize: bool = False,
         metric_thr: float = 0.0,
+        metric: str = "alignscore",
         aggregation: str = "mean"
     ):
         super().__init__(
-            ["embeddings", "train_embeddings", "background_train_embeddings", "train_token_embeddings", "train_token_metrics", "background_train_token_embeddings"],
+            ["embeddings", "train_embeddings", "background_train_embeddings", "train_token_embeddings", "train_token_metrics", "train_token_accuracy", "background_train_token_embeddings"],
             "sequence",
         )
         self.centroid_0 = None
@@ -52,14 +53,15 @@ class RelativeTokenMahalanobisDistance(Estimator):
         self.min = 1e100
         self.max = -1e100
         self.MD = TokenMahalanobisDistance(
-            embeddings_type, parameters_path, normalize=False, metric_thr=metric_thr, aggregation="none"
+            embeddings_type, parameters_path, normalize=False, metric_thr=metric_thr, metric=metric, aggregation="none"
         )
         self.is_fitted = False
         self.metric_thr = metric_thr
         self.aggregation = aggregation
+        self.metric = metric
         
         if self.parameters_path is not None:
-            self.full_path = f"{self.parameters_path}/rtmd_{self.embeddings_type}_{self.aggregation}_{self.metric_thr}"
+            self.full_path = f"{self.parameters_path}/rtmd_{self.embeddings_type}_{self.aggregation}_{self.metric}_{self.metric_thr}"
             os.makedirs(self.full_path, exist_ok=True)
             if os.path.exists(f"{self.full_path}/centroid_0.pt"):
                 self.centroid_0 = torch.load(f"{self.full_path}/centroid_0.pt")
@@ -69,7 +71,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
                 self.is_fitted = True
 
     def __str__(self):
-        return f"RelativeMahalanobisDistance_{self.embeddings_type} ({self.aggregation}, {self.metric_thr})"
+        return f"RelativeMahalanobisDistance_{self.embeddings_type} ({self.aggregation}, {self.metric}, {self.metric_thr})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         # take the embeddings
