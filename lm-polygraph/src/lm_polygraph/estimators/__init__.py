@@ -23,6 +23,7 @@ from .semantic_entropy import SemanticEntropy
 from .semantic_entropy_token import SemanticEntropyToken
 from .perplexity import Perplexity
 from .mahalanobis_distance import MahalanobisDistanceSeq
+from .token_mahalanobis_distance import TokenMahalanobisDistance
 from .relative_mahalanobis_distance import RelativeMahalanobisDistanceSeq
 from .rde import RDESeq
 from .ppl_md import PPLMDSeq

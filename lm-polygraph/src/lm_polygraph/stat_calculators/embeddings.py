@@ -5,7 +5,7 @@ from typing import Dict, List
 
 from .stat_calculator import StatCalculator
 from lm_polygraph.utils.model import WhiteboxModel
-
+from lm_polygraph.generation_metrics.alignscore import AlignScore
 
 def get_embeddings_from_output(
     output,
@@ -16,6 +16,7 @@ def get_embeddings_from_output(
     use_averaging: bool = True,
     all_layers: bool = False,
     aggregation_method: str = "mean",
+    level: str = "sequence",
 ):
     batch_embeddings = None
     batch_embeddings_decoder = None
@@ -38,12 +39,19 @@ def get_embeddings_from_output(
                     dim=1,
                 )
         if len(output.hidden_states) > 1:
-            batch_embeddings_decoder = (
-                torch.cat([input_tokens_hs, generated_tokens_hs], dim=1)
-                .mean(axis=1)
-                .cpu()
-                .detach()
-            )
+            if level == "sequence":
+                batch_embeddings_decoder = (
+                    torch.cat([input_tokens_hs, generated_tokens_hs], dim=1)
+                    .mean(axis=1)
+                    .cpu()
+                    .detach()
+                )
+            elif level == "token":
+                batch_embeddings_decoder = (
+                    torch.cat([input_tokens_hs[:, -1:], generated_tokens_hs], dim=1)
+                    .cpu()
+                    .detach()
+                )
         else:
             batch_embeddings_decoder = input_tokens_hs.mean(axis=1).cpu().detach()
         batch_embeddings = None
@@ -160,8 +168,9 @@ def aggregate(x, aggregation_method, axis):
 
 class EmbeddingsCalculator(StatCalculator):
     def __init__(self):
-        super().__init__(["train_embeddings", "background_train_embeddings"], [])
+        super().__init__(["train_embeddings", "background_train_embeddings", "train_token_embeddings", "background_train_token_embeddings", "train_token_metrics"], [])
         self.hidden_layer = -1
+        self.alignscore = AlignScore()
 
     def __call__(
         self,
@@ -178,7 +187,7 @@ class EmbeddingsCalculator(StatCalculator):
                 output_scores=True,
                 return_dict_in_generate=True,
                 max_new_tokens=max_new_tokens,
-                min_length=2,
+                min_new_tokens=1,
                 output_attentions=False,
                 output_hidden_states=True,
                 num_beams=1,
@@ -192,13 +201,41 @@ class EmbeddingsCalculator(StatCalculator):
                     ]
                 ),
             )
+            sequences = out.sequences
+            cut_texts = []
+            cut_sequences = []
+            for i in range(len(texts)):
+                if model.model_type == "CausalLM":
+                    idx = batch["input_ids"].shape[1]
+                    seq = sequences[i, idx:].cpu()
+                else:
+                    seq = sequences[i, 1:].cpu()
+                length, text_length = len(seq), len(seq)
+                for j in range(len(seq)):
+                    if seq[j] == model.tokenizer.eos_token_id:
+                        length = j + 1
+                        text_length = j
+                        break
+                cut_texts.append(model.tokenizer.decode(seq[:text_length]))
+                cut_sequences.append(seq[:length].tolist())
+            
+            stats = {"greedy_texts": cut_texts, "target_texts": dependencies["target_texts"]}
+            scores = self.alignscore(stats, None, None)
+            tokenwise_scores = [[score]*len(cut_sequences[i]) for i, score in enumerate(scores)]
+            
             embeddings_encoder, embeddings_decoder = get_embeddings_from_output(
                 out, batch, model.model_type
             )
+            token_embeddings_encoder, token_embeddings_decoder = get_embeddings_from_output(
+                out, batch, model.model_type, level="token"
+            )
+            token_embeddings_decoder = token_embeddings_decoder.reshape(-1, model.model.config.hidden_size)
 
         if model.model_type == "CausalLM":
             return {
                 "embeddings_decoder": embeddings_decoder.cpu().detach().numpy(),
+                "token_embeddings_decoder": token_embeddings_decoder.cpu().detach().numpy(),
+                "token_metrics": tokenwise_scores,
             }
         elif model.model_type == "Seq2SeqLM":
             return {

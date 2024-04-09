@@ -71,6 +71,7 @@ class GreedyProbsCalculator(StatCalculator):
                 "greedy_log_likelihoods",
                 "train_greedy_log_likelihoods",
                 "embeddings",
+                "token_embeddings",
             ],
             [],
         )
@@ -137,6 +138,10 @@ class GreedyProbsCalculator(StatCalculator):
             embeddings_encoder, embeddings_decoder = get_embeddings_from_output(
                 out, batch, model.model_type
             )
+            token_embeddings_encoder, token_embeddings_decoder = get_embeddings_from_output(
+                out, batch, model.model_type, level="token"
+            )
+            token_embeddings_decoder = token_embeddings_decoder.reshape(-1, model.model.config.hidden_size)
 
         cut_logits = []
         cut_sequences = []
@@ -180,6 +185,7 @@ class GreedyProbsCalculator(StatCalculator):
         if model.model_type == "CausalLM":
             embeddings_dict = {
                 "embeddings_decoder": embeddings_decoder,
+                "token_embeddings_decoder": token_embeddings_decoder.cpu().detach().numpy(),
             }
         elif model.model_type == "Seq2SeqLM":
             embeddings_dict = {
