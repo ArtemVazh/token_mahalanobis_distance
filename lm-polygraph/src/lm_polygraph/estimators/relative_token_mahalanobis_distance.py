@@ -127,6 +127,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
         # RMD calculation
 
         dists = md - dists_0
+        
         agg_dists = []
         k = 0
         for tokens in stats["greedy_tokens"]:
@@ -152,4 +153,4 @@ class RelativeTokenMahalanobisDistance(Estimator):
                 (self.max - agg_dists) / (self.max - self.min), a_min=0, a_max=1
             )
 
-        return dists
+        return agg_dists
