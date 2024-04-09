@@ -206,6 +206,11 @@ class Dataset:
                 ):
                     x.append(prompt.format(story=doc_to_text(inst, j)))
                     y.append(answer)
+        elif ("sciq" in dataset_name.lower()) and len(prompt):
+            x, y = [], []
+            for inst in dataset:
+                x.append(prompt.format(context=inst["support"], question=inst[x_column]))
+                y.append(inst[y_column])
         elif ("trivia_qa" in dataset_name.lower()) and len(prompt):
             few_shot = ""
             if few_shot_data is not None:

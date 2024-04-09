@@ -7,17 +7,16 @@ save_path: '${hydra:run.dir}'
 
 device: cpu
 
-task: nmt
+task: qa
 
-dataset: [wmt14, de-en]
-text_column: de
-label_column: en
-prompt: "Translate from {source_lang} into {target_lang}. Output only translation:\n{text}\nTranslation:\n"
+dataset: sciq
+text_column: question
+label_column: correct_answer
+prompt: "Answer the question given a context. Output only the answer itself.\nContext:\n{context}\nQ:{question}\nA:"
 train_split: train
-eval_split: test
-max_new_tokens: 107
+eval_split: validation
+max_new_tokens: 20
 load_from_disk: false
-use_few_shot_data: false
 
 train_dataset: null
 train_test_split: false
