@@ -276,37 +276,104 @@ def get_density_based_ue_methods(args, model_type):
                 PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
             ]
         else:
-            estimators += [
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="mean"),
-                
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="sum"),
-                
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
-                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
-                
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="mean"),
-                
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="sum"),
-                
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
-                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
-                                
-                #MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
-                #RelativeMahalanobisDistanceSeq(
-                #    "decoder", parameters_path=parameters_path
-                #),
-                #RDESeq("decoder", parameters_path=parameters_path),
-                #PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
-                #PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
-            ]
+            if (args.dataset in ["xsum"]) or ("wmt14" in args.dataset):
+                estimators += [
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
+                    
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
+
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="rougel", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="rougel", aggregation="mean"),
+
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="rougel", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="rougel", aggregation="sum"),
+                           
+                    #MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
+                    #RelativeMahalanobisDistanceSeq(
+                    #    "decoder", parameters_path=parameters_path
+                    #),
+                    #RDESeq("decoder", parameters_path=parameters_path),
+                    #PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
+                    #PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
+                ]
+            elif args.dataset in ["gsm8k"]:
+                estimators += [
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="alignscore", aggregation="mean"),
+                    
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="alignscore", aggregation="sum"),
+                    
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="alignscore", aggregation="mean"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.3, metric="alignscore", aggregation="sum"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
+                                    
+                    #MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
+                    #RelativeMahalanobisDistanceSeq(
+                    #    "decoder", parameters_path=parameters_path
+                    #),
+                    #RDESeq("decoder", parameters_path=parameters_path),
+                    #PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
+                    #PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
+                ]
+            else:
+                estimators += [
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="mean"),
+                    
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="sum"),
+                    
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="mean"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.0, metric="alignscore", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="alignscore", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="alignscore", aggregation="sum"),
+                    
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="mean"),                
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=1.0, metric="accuracy", aggregation="sum"),
+
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="rougel", aggregation="mean"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="rougel", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="rougel", aggregation="mean"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="rougel", aggregation="mean"),
+
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="rougel", aggregation="sum"),
+                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="rougel", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.5, metric="rougel", aggregation="sum"),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric_thr=0.9, metric="rougel", aggregation="sum"),
+                                    
+                    #MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
+                    #RelativeMahalanobisDistanceSeq(
+                    #    "decoder", parameters_path=parameters_path
+                    #),
+                    #RDESeq("decoder", parameters_path=parameters_path),
+                    #PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
+                    #PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
+                ]
     return estimators
 
 

@@ -7,6 +7,7 @@ from .stat_calculator import StatCalculator
 from lm_polygraph.utils.model import WhiteboxModel
 from lm_polygraph.generation_metrics.alignscore import AlignScore
 from lm_polygraph.generation_metrics.accuracy import AccuracyMetric
+from lm_polygraph.generation_metrics.rouge import RougeMetric
 
 def get_embeddings_from_output(
     output,
@@ -169,10 +170,12 @@ def aggregate(x, aggregation_method, axis):
 
 class EmbeddingsCalculator(StatCalculator):
     def __init__(self):
-        super().__init__(["train_embeddings", "background_train_embeddings", "train_token_embeddings", "background_train_token_embeddings", "train_token_metrics", "train_token_accuracy"], [])
+        super().__init__(["train_embeddings", "background_train_embeddings", "train_token_embeddings", "background_train_token_embeddings", 
+                          "train_token_metrics", "train_token_accuracy", "train_token_rougel"], [])
         self.hidden_layer = -1
         self.alignscore = AlignScore()
         self.accuracy = AccuracyMetric()
+        self.rouge = RougeMetric("rougeL")
 
     def __call__(
         self,
@@ -227,6 +230,9 @@ class EmbeddingsCalculator(StatCalculator):
             
             acc = self.accuracy(stats, dependencies["target_texts"], None)
             tokenwise_accuracy = [[score]*len(cut_sequences[i]) for i, score in enumerate(acc)]
+
+            rougel = self.rouge(stats, dependencies["target_texts"], None)
+            tokenwise_rougel = [[score]*len(cut_sequences[i]) for i, score in enumerate(rougel)]
             
             embeddings_encoder, embeddings_decoder = get_embeddings_from_output(
                 out, batch, model.model_type
@@ -242,6 +248,7 @@ class EmbeddingsCalculator(StatCalculator):
                 "token_embeddings_decoder": token_embeddings_decoder.cpu().detach().numpy(),
                 "token_metrics": tokenwise_scores,
                 "token_accuracy": tokenwise_accuracy,
+                "token_rougel": tokenwise_rougel,
             }
         elif model.model_type == "Seq2SeqLM":
             return {

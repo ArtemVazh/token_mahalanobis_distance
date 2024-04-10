@@ -24,7 +24,7 @@ class TokenMahalanobisDistance(Estimator):
         metric: str = "alignscore",
         aggregation: str = "mean"
     ):
-        super().__init__(["token_embeddings", "train_token_embeddings", "train_token_metrics", "train_token_accuracy"], "sequence")
+        super().__init__(["token_embeddings", "train_token_embeddings", "train_token_metrics", "train_token_accuracy", "train_token_rougel"], "sequence")
         self.centroid = None
         self.sigma_inv = None
         self.parameters_path = parameters_path
@@ -68,14 +68,20 @@ class TokenMahalanobisDistance(Estimator):
                     for xs in stats["train_token_metrics"]
                     for x in xs
                 ])
+            elif self.metric == "rougel":
+                train_token_metrics = np.array([
+                    x
+                    for xs in stats["train_token_rougel"]
+                    for x in xs
+                ])
             else:
                 train_token_metrics = np.array([
                     x
                     for xs in stats["train_token_accuracy"]
                     for x in xs
                 ])
-            train_embeddings = train_embeddings[train_token_metrics >= self.metric_thr]
-            
+            if (train_token_metrics >= self.metric_thr).sum() > 50:
+                train_embeddings = train_embeddings[train_token_metrics >= self.metric_thr]
             self.centroid = train_embeddings.mean(axis=0)
             if self.parameters_path is not None:
                 torch.save(self.centroid, f"{self.full_path}/centroid.pt")
@@ -91,13 +97,20 @@ class TokenMahalanobisDistance(Estimator):
                     for xs in stats["train_token_metrics"]
                     for x in xs
                 ])
+            elif self.metric == "rougel":
+                train_token_metrics = np.array([
+                    x
+                    for xs in stats["train_token_rougel"]
+                    for x in xs
+                ])
             else:
                 train_token_metrics = np.array([
                     x
                     for xs in stats["train_token_accuracy"]
                     for x in xs
                 ])
-            train_embeddings = train_embeddings[train_token_metrics >= self.metric_thr]
+            if (train_token_metrics >= self.metric_thr).sum() > 50:
+                train_embeddings = train_embeddings[train_token_metrics >= self.metric_thr]
             self.sigma_inv, _ = compute_inv_covariance(
                 self.centroid.unsqueeze(0), train_embeddings
             )
