@@ -1,0 +1,1 @@
+lm-polygraph @ git+https://github.com/ArtemVazh/lm-polygraph.git
