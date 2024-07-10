@@ -34,8 +34,10 @@ from lm_polygraph.estimators.ensemble_sequence_measures import all_ep_estimators
 from lm_polygraph.estimators.ensemble_token_measures import *
 from lm_polygraph.ue_metrics import *
 
-from token_mahalanobis_distance import TokenMahalanobisDistance
-from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance
+from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
+from token_knn import TokenKNN
+
+from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
 
 hydra_config = Path(os.environ["HYDRA_CONFIG"])
 
@@ -189,7 +191,7 @@ def main(args):
                     else:
                         train_dataset.concat(train_dataset_k.x, train_dataset_k.y)
 
-        if any([not getattr(method, "is_fitted", False) for method in density_based_ue_methods]):
+        if any([not getattr(method, "is_fitted", False) for method in estimators]):
             background_train_dataset = Dataset.load(
                 args.background_train_dataset,
                 args.background_train_dataset_text_column,
@@ -299,6 +301,7 @@ def get_density_based_ue_methods(args, model_type):
                 normalize = getattr(args, "normalize", False),
             )
         alignscorer = AlignScore(batch_size=4)
+        rougel = RougeMetric("rougeL")
     
         if getattr(args, 'parameters_path', False):
             parameters_path = args.parameters_path
@@ -336,27 +339,30 @@ def get_density_based_ue_methods(args, model_type):
                 # PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
             ]
 
-            layers = getattr(args, "layers", [0, 5, 10, 15, 20, 25, 30, -1])
+            layers = getattr(args, "layers", [0, -1])
             metric_thrs = getattr(args, "metric_thrs", [0.5])
-            for layer in layers:
-                estimators += [
-                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0),
-                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0),
-                    TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation="sum"),
-                    RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation="sum"),
-                ]
-                for thr in metric_thrs:
-                    estimators += [
-                        TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=accuracy, metric_name="accuracy", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr),
-                        RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=accuracy, metric_name="accuracy", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr),
-                        TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=alignscorer, metric_name="alignscore", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr),
-                        RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=alignscorer, metric_name="alignscore", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr),
+            metrics = [accuracy, alignscorer]#rougel
+            metrics_names = ["Accuracy", "AlignScore"]#"Rouge-L"
+            aggregations = ["mean"]#, "sum"]
 
-                        TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=accuracy, metric_name="accuracy", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation="sum"),
-                        RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=accuracy, metric_name="accuracy", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation="sum"),
-                        TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=alignscorer, metric_name="alignscore", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation="sum"),
-                        RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=alignscorer, metric_name="alignscore", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation="sum"),
-                    ]
+            for agg in aggregations:
+                for layer in layers:
+                    estimators += [
+                            TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg),
+                            RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg),
+                            #TokenKNN(hidden_layer=layer, metric_thr=0, aggregation=agg),
+
+                        ]                    
+                    for m, m_name in zip(metrics, metrics_names):
+                        for k, thr in enumerate(metric_thrs):
+                            if (k > 0) and (m_name=="Accuracy"):
+                                continue
+                            estimators += [
+                                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
+                                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
+                                #TokenKNN(metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
+    
+                            ]
     return estimators
 
 
@@ -441,13 +447,20 @@ def get_ue_methods(args, model):
     if getattr(args, "use_claim_ue", False):
         estimators += [
             MaximumClaimProbability(),
-            PerplexityClaim(),
-            MaxTokenEntropyClaim(),
-            PointwiseMutualInformationClaim(),
-            PTrueClaim(),
-            ClaimConditionedProbabilityClaim(nli_context="no_context"),
-            ClaimConditionedProbabilityClaim(nli_context="fact_pref"),
+            # PerplexityClaim(),
+            # MaxTokenEntropyClaim(),
+            # PointwiseMutualInformationClaim(),
+            # PTrueClaim(),
+            # ClaimConditionedProbabilityClaim(nli_context="no_context"),
+            # ClaimConditionedProbabilityClaim(nli_context="fact_pref"),
         ]
+        layers = getattr(args, "layers", [0, -1])
+        metric_thrs = getattr(args, "metric_thrs", [0.0, 0.5])
+        for layer in layers:
+            for thr in metric_thrs:
+                estimators += [TokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr),
+                               RelativeTokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr)]                    
+            
 
     additional_estimators = getattr(args, "additional_estimators", {})
     additional_estimators_kwargs = getattr(args, "additional_estimators_kwargs", {})
