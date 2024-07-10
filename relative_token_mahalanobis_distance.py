@@ -12,7 +12,7 @@ from lm_polygraph.estimators.mahalanobis_distance import (
     create_cuda_tensor_from_numpy,
 )
 
-from token_mahalanobis_distance import TokenMahalanobisDistance
+from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 
 def save_array(array, filename):
     with open(filename, "wb") as f:
@@ -166,3 +166,128 @@ class RelativeTokenMahalanobisDistance(Estimator):
             )
 
         return agg_dists
+
+
+
+class RelativeTokenMahalanobisDistanceClaim(Estimator):
+    """
+    Ren et al. (2023) showed that it might be useful to adjust the Mahalanobis distance score by subtracting
+    from it the other Mahalanobis distance MD_0(x) computed for some large general purpose dataset covering many domain.
+    RMD(x) = MD(x) - MD_0(x)
+    """
+
+    def __init__(
+        self,
+        embeddings_type: str = "decoder",
+        parameters_path: str = None,
+        normalize: bool = False,
+        metric_thr: float = 0.0,
+        aggregation: str = "mean",
+        metric = None,
+        hidden_layer: int = -1,
+    ):
+        self.hidden_layer = hidden_layer
+        if self.hidden_layer == -1:
+            super().__init__(["token_embeddings", "train_token_embeddings", "background_train_embeddings", "train_greedy_tokens", "train_target_texts"], "claim")
+        else:
+            super().__init__([f"token_embeddings_{self.hidden_layer}", f"train_token_embeddings_{self.hidden_layer}", f"background_train_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "claim")
+        self.centroid_0 = None
+        self.sigma_inv_0 = None
+        self.parameters_path = parameters_path
+        self.embeddings_type = embeddings_type
+        self.normalize = normalize
+        self.min = 1e100
+        self.max = -1e100
+        self.MD = TokenMahalanobisDistanceClaim(
+            embeddings_type, parameters_path, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=self.hidden_layer
+        )
+        self.is_fitted = False
+        self.metric_thr = metric_thr
+        self.aggregation = aggregation
+        self.metric = metric
+
+    def __str__(self):
+        hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
+        return f"RelativeTokenMahalanobisDistanceClaim_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_thr})"
+
+    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+        # take the embeddings
+        if self.hidden_layer == -1:
+            hidden_layer = ""
+        else:
+            hidden_layer = f"_{self.hidden_layer}"
+        embeddings = create_cuda_tensor_from_numpy(
+            stats[f"token_embeddings_{self.embeddings_type}{hidden_layer}"]
+        )
+
+        # since we want to adjust resulting reasure on baseline MD on train part
+        # we have to compute average train centroid and inverse cavariance matrix
+        # to obtain MD_0
+
+        if not self.is_fitted:
+            background_train_embeddings = create_cuda_tensor_from_numpy(
+                stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+            )
+            self.centroid_0 = background_train_embeddings.mean(axis=0)
+            if self.parameters_path is not None:
+                torch.save(self.centroid_0, f"{self.full_path}/centroid_0.pt")
+
+        if not self.is_fitted:
+            background_train_embeddings = create_cuda_tensor_from_numpy(
+                stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+            )
+            self.sigma_inv_0, _ = compute_inv_covariance(
+                self.centroid_0.unsqueeze(0), background_train_embeddings
+            )
+            if self.parameters_path is not None:
+                torch.save(self.sigma_inv_0, f"{self.full_path}/sigma_inv_0.pt")
+            self.is_fitted = True
+
+        if torch.cuda.is_available():
+            if not self.centroid_0.is_cuda:
+                self.centroid_0 = self.centroid_0.cuda()
+            if not self.sigma_inv_0.is_cuda:
+                self.sigma_inv_0 = self.sigma_inv_0.cuda()
+
+        # compute MD_0
+
+        dists_0 = (
+            mahalanobis_distance_with_known_centroids_sigma_inv(
+                self.centroid_0.float(),
+                None,
+                self.sigma_inv_0.float(),
+                embeddings.float(),
+            )[:, 0]
+            .cpu()
+            .detach()
+            .numpy()
+        )
+
+        # compute original MD
+
+        md = self.MD(stats)
+
+        # RMD calculation
+
+        dists = md - dists_0
+
+        k = 0
+        tmd_scores = []
+        claims = stats["claims"]
+        for idx, tokens in enumerate(stats["greedy_tokens"]):
+            dists_i = dists[k:k+len(tokens)]
+            k += len(tokens)
+
+            tmd_scores.append([])
+            for claim in claims[idx]:
+                tokens = np.array(claim.aligned_token_ids)
+                claim_p_i = dists_i[tokens]
+                
+                if self.aggregation == "mean":
+                    tmd_scores[-1].append(claim_p_i.mean())
+                elif self.aggregation  == "sum":
+                    tmd_scores[-1].append(claim_p_i.sum())
+
+        tmd_scores = np.array(tmd_scores)
+
+        return tmd_scores
