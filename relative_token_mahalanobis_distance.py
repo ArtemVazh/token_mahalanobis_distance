@@ -149,6 +149,9 @@ class RelativeTokenMahalanobisDistance(Estimator):
                 agg_dists.append(np.mean(dists_i))
             elif self.aggregation == "sum":
                 agg_dists.append(np.sum(dists_i))
+        if self.aggregation == "none":
+            agg_dists = dists
+            
         agg_dists = np.array(agg_dists)
         
         if self.max < agg_dists.max():
