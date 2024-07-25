@@ -204,7 +204,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
 
         tgt_norm: bool = False,
         remove_corr: bool = False,
-        remove_alg: int = 2
+        remove_alg: int = 2,        
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
@@ -292,9 +292,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
                         train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
                         train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
                     
-                    
-                
-                md = self.tmds[layer](train_stats).reshape(-1)
+                md = self.tmds[layer](train_stats, save_data=False).reshape(-1)
                 self.tmds[layer].is_fitted = False
                 k = 0
                 mean_md = []

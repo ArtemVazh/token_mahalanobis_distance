@@ -67,7 +67,7 @@ class TokenMahalanobisDistance(Estimator):
         hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
         return f"TokenMahalanobisDistance_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
 
-    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+    def __call__(self, stats: Dict[str, np.ndarray], save_data: bool = True) -> np.ndarray:
         # take the embeddings
         if self.hidden_layer == -1:
             hidden_layer = ""
@@ -76,12 +76,11 @@ class TokenMahalanobisDistance(Estimator):
         embeddings = create_cuda_tensor_from_numpy(
             stats[f"token_embeddings_{self.embeddings_type}{hidden_layer}"]
         )
-        print(str(self), stats.keys())
         
         # compute centroids if not given
         if not self.is_fitted:
             centroid_key = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}"
-            if centroid_key in stats.keys(): # to reduce number of stored centroid for multiple methods used the same data
+            if (centroid_key in stats.keys()) and save_data: # to reduce number of stored centroid for multiple methods used the same data
                 self.centroid = stats[centroid_key]
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
@@ -100,12 +99,13 @@ class TokenMahalanobisDistance(Estimator):
                 self.centroid = train_embeddings.mean(axis=0)
                 if self.parameters_path is not None:
                     torch.save(self.centroid, f"{self.full_path}/centroid.pt")
-                stats[centroid_key] = self.centroid
+                if save_data:
+                    stats[centroid_key] = self.centroid
 
         # compute inverse covariance matrix if not given
         if not self.is_fitted:
             covariance_key = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}"
-            if covariance_key in stats.keys(): # to reduce number of stored centroid for multiple methods used the same data
+            if (covariance_key in stats.keys()) and save_data: # to reduce number of stored centroid for multiple methods used the same data
                 self.sigma_inv = stats[covariance_key]
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
@@ -120,7 +120,9 @@ class TokenMahalanobisDistance(Estimator):
                 )
                 if self.parameters_path is not None:
                     torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
-                stats[covariance_key] = self.sigma_inv
+                
+                if save_data:
+                    stats[covariance_key] = self.sigma_inv
             self.is_fitted = True
 
         if torch.cuda.is_available():
