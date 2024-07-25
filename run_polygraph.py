@@ -36,6 +36,7 @@ from lm_polygraph.ue_metrics import *
 
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from token_knn import TokenKNN
+from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance
 
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
 
@@ -300,7 +301,7 @@ def get_density_based_ue_methods(args, model_type):
                 output_ignore_regex = getattr(args, "output_ignore_regex", None),
                 normalize = getattr(args, "normalize", False),
             )
-        alignscorer = AlignScore(batch_size=4)
+        alignscorer = AlignScore(batch_size=1)
         rougel = RougeMetric("rougeL")
     
         if getattr(args, 'parameters_path', False):
@@ -341,8 +342,12 @@ def get_density_based_ue_methods(args, model_type):
 
             layers = getattr(args, "layers", [0, -1])
             metric_thrs = getattr(args, "metric_thrs", [0.5])
-            metrics = [accuracy, alignscorer]#rougel
-            metrics_names = ["Accuracy", "AlignScore"]#"Rouge-L"
+            if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
+                metrics = [accuracy, alignscorer]
+                metrics_names = ["Accuracy", "AlignScore"]
+            else:
+                metrics = [rougel, alignscorer]
+                metrics_names = ["Rouge-L", "AlignScore"]
             aggregations = ["mean"]#, "sum"]
 
             for agg in aggregations:
@@ -350,8 +355,6 @@ def get_density_based_ue_methods(args, model_type):
                     estimators += [
                             TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg),
                             RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg),
-                            #TokenKNN(hidden_layer=layer, metric_thr=0, aggregation=agg),
-
                         ]                    
                     for m, m_name in zip(metrics, metrics_names):
                         for k, thr in enumerate(metric_thrs):
@@ -359,10 +362,24 @@ def get_density_based_ue_methods(args, model_type):
                                 continue
                             estimators += [
                                 TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
-                                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
-                                #TokenKNN(metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
-    
+                                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),    
                             ]
+
+            for m, m_name in zip(metrics, metrics_names):
+                for ue in ["TokenMahalanobis", "RelativeTokenMahalanobis"]:
+                    for k, thr in enumerate(metric_thrs):
+                        estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+                                                                      metric=m, metric_name=m_name, metric_md=m, metric_md_name=m_name, 
+                                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr, aggregation="mean",
+                                                                      ue=ue, positive=False, meta_model="LinReg", norm="norm")]
+                        estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+                                                                      metric=m, metric_name=m_name, metric_md=m, metric_md_name=m_name, 
+                                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr, aggregation="mean",
+                                                                      ue=ue, positive=False, meta_model="LinReg", norm="unnorm")]
+                        estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+                                                                      metric=m, metric_name=m_name, metric_md=m, metric_md_name=m_name, 
+                                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr, aggregation="mean",
+                                                                          ue=ue, positive=False, meta_model="LinReg", norm="orig")]
     return estimators
 
 
