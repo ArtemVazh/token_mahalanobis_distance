@@ -17,8 +17,110 @@ from lm_polygraph.estimators.mahalanobis_distance import (
 
 from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 from token_mahalanobis_distance import TokenMahalanobisDistance
+from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance
+from sklearn.linear_model import Ridge, RidgeCV
+from sklearn.ensemble import RandomForestRegressor
+from scipy.stats import rankdata
 
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
+from tqdm import tqdm
+import torch.nn as nn
+import torch.optim as optim
+
+from lm_polygraph.ue_metrics.ue_metric import get_random_scores
+from lm_polygraph.ue_metrics.pred_rej_area import PredictionRejectionArea
+
+import scipy
+import scipy.cluster.hierarchy as sch
+
+prr = PredictionRejectionArea()
+
+def get_prr(ue, metric):
+    mean_val = prr(ue, metric) 
+    oracle = prr(-metric, metric)
+    random = get_random_scores(prr, metric)
+    final_score = (mean_val - random) / (oracle - random)
+    return final_score
+
+class MLP_NN(nn.Module):
+    def __init__(self,
+                 n_features: int = 1603, 
+                 n_dim: int = 512, 
+                 n_layers: int = 4, 
+                 dropout: float = 0.1,):
+        super().__init__()
+        self.layers = nn.ModuleList([nn.Linear(n_features, n_dim)] + [nn.Linear(n_dim, n_dim) for i in range(n_layers - 2)] + [nn.Linear(n_dim, 1)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+class MLP:
+    def __init__(self, 
+                 n_features: int = 1603, 
+                 n_dim: int = 512, 
+                 n_layers: int = 4, 
+                 dropout: float = 0.1,
+                 n_epochs: int = 20,
+                 lr: float = 1e-5,
+                 batch_size: int = 256):
+        self.n_epochs = n_epochs
+        self.batch_size = batch_size
+        self.loss = nn.MarginRankingLoss(margin=0.1)
+        self.mse = nn.MSELoss() 
+        self.model = MLP_NN(n_features, n_dim, n_layers, dropout)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-5)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    def fit(self, X, y):
+        X_torch = torch.tensor(X, dtype=torch.float32)
+        y_torch = torch.tensor(y, dtype=torch.float32).reshape(-1, 1)
+        batch_start = torch.arange(0, len(X), self.batch_size)
+        self.model.to(self.device)
+        for epoch in tqdm(range(self.n_epochs)):
+            self.model.train()
+            for start in batch_start:
+                X_batch = X_torch[start:start+self.batch_size].to(self.device)
+                y_batch = y_torch[start:start+self.batch_size].to(self.device)
+                y_pred = self.model(X_batch)
+                x1, x2, target = [], [], []
+                
+                for i in range(len(y_pred)):
+                    for j in range(i+1, len(y_pred)):
+                        if y_batch[i] > y_batch[j]:
+                            target.append(1)
+                        elif y_batch[i] < y_batch[j]:
+                            target.append(-1)
+                        else:
+                            continue
+                        x1.append(y_pred[i])
+                        x2.append(y_pred[j])
+
+                x1 = torch.stack(x1).reshape(-1).to(self.device)
+                x2 = torch.stack(x2).reshape(-1).to(self.device)
+                target = torch.Tensor(target).to(self.device)
+                
+                loss = self.loss(x1, x2, target) + self.mse(y_pred, y_batch)       
+                #loss = self.loss(y_pred, y_batch)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                
+    def predict(self, X):
+        X_torch = torch.tensor(X, dtype=torch.float32)
+        batch_start = torch.arange(0, len(X), self.batch_size)
+        self.model.eval()
+        prediction = []
+        if next(self.model.parameters()).device.type != self.device.type:
+            self.model.to(self.device)
+        for start in batch_start:
+            X_batch = X_torch[start:start+self.batch_size].to(self.device)
+            y_pred = self.model(X_batch)
+            prediction.append(y_pred.cpu().detach().flatten())
+        prediction = np.concatenate(prediction)
+        return prediction
 
 class AverageTokenMahalanobisDistance(Estimator):
     def __init__(
@@ -76,3 +178,228 @@ class AverageTokenMahalanobisDistance(Estimator):
                 agg_dists.append(np.sum(dists_i))
 
         return agg_dists
+
+
+class LinRegTokenMahalanobisDistance(Estimator):
+    def __init__(
+        self,
+        embeddings_type: str = "decoder",
+        parameters_path: str = None,
+        normalize: bool = False,
+        metric_thr: float = 0.0,
+        aggregation: str = "mean",
+        hidden_layers: List[int] = [0, -1],
+        metric = None,
+        metric_name: str = "",
+
+        metric_md = None,
+        metric_md_name: str = "",
+        
+        aggregated: bool = False,
+        positive: bool = True,
+        ue: str = "TokenMahalanobis",
+
+        meta_model: str = "LinReg",
+        norm: str = "norm",
+
+        tgt_norm: bool = False,
+        remove_corr: bool = False,
+        remove_alg: int = 2
+    ):
+        self.ue = ue
+        self.hidden_layers = hidden_layers
+        self.tmds = {}
+        dependencies = ["train_greedy_tokens", "train_target_texts"]
+        for layer in self.hidden_layers:
+            if layer == -1:
+                dependencies += ["token_embeddings", "train_token_embeddings"]
+                if "relative" in ue.lower():
+                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+            else:
+                dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
+                if "relative" in ue.lower():
+                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+            if ue == "TokenMahalanobis":
+                self.tmds[layer] = TokenMahalanobisDistance(
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated
+                )
+            elif ue == "RelativeTokenMahalanobis":
+                self.tmds[layer] = RelativeTokenMahalanobisDistance(
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated
+                )
+        
+        super().__init__(dependencies, "sequence")
+        self.parameters_path=parameters_path
+        self.is_fitted = False
+        self.metric_thr = metric_thr
+        self.metric = metric
+        self.aggregation = aggregation
+        self.metric_name = metric_name
+        self.metric_md_name = metric_md_name
+        self.embeddings_type=embeddings_type
+        self.positive=positive
+        self.meta_model=meta_model
+        self.norm=norm
+        self.tgt_norm=tgt_norm
+        self.remove_corr=remove_corr
+        self.remove_alg=remove_alg
+    
+    def __str__(self):
+        hidden_layers = ",".join([str(x) for x in self.hidden_layers])
+        positive = "pos" if self.positive else ""
+        tgt_norm = "tgt_norm" if self.tgt_norm else ""
+        remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
+        return f"{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
+
+    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+        
+        if not self.is_fitted: 
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            train_greedy_tokens = stats[f"train_greedy_tokens"]
+            train_target_texts = stats[f"train_target_texts"]
+            self.train_seq_metrics = np.array([self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0] if isinstance(y, str) else self.metric({"greedy_texts": [x], "target_texts": [y[0]]}, [y[0]], [y[0]])[0]
+                                                 for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+
+            train_mds = []
+            dev_size = 0.5
+            dev_samples = int(len(train_greedy_texts) * dev_size)
+            len_tokens = [len(tokens) for tokens in train_greedy_tokens]
+            dev_tokens = np.sum(len_tokens[:dev_samples])
+                
+            for layer in self.hidden_layers:
+                if layer == -1:
+                    train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
+                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
+                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
+                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
+                                   "train_target_texts": train_target_texts[:dev_samples],
+                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[:dev_tokens],
+                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[dev_tokens:],
+                                  }
+                    if "relative" in self.ue.lower(): 
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][:dev_tokens]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][dev_tokens:]
+                else:
+                    train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
+                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
+                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
+                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
+                                   "train_target_texts": train_target_texts[:dev_samples],
+                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[:dev_tokens],
+                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[dev_tokens:],
+                                  }
+                    if "relative" in self.ue.lower(): 
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
+                    
+                    
+                
+                md = self.tmds[layer](train_stats).reshape(-1)
+                self.tmds[layer].is_fitted = False
+                k = 0
+                mean_md = []
+                for tokens in train_greedy_tokens[dev_samples:]:
+                    dists_i = md[k:k+len(tokens)]
+                    k += len(tokens)
+                    mean_md.append(np.mean(dists_i))
+                train_mds.append(mean_md)
+            train_dists = np.array(train_mds).T
+            np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
+            np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
+            print(train_dists, self.train_seq_metrics)
+            print("NAN:", np.isnan(train_dists).sum())
+            train_dists[np.isnan(train_dists)] = 0
+            if self.meta_model == "LinReg":
+                self.regressor = Ridge(positive=self.positive)
+            elif self.meta_model == "MLP":                
+                self.regressor = MLP(n_features=train_dists.shape[1])
+            #elif self.meta_model == "weights":
+            scores = []
+            for i in range(train_dists.shape[-1]):
+                scores.append(get_prr(train_dists[:, i], self.train_seq_metrics[dev_samples:]))
+            self.weights = np.array(scores)
+            print("\n\n weights: ", self.weights)
+            self.weights /= np.abs(self.weights).sum()
+            print("\n\n weights: ", self.weights)
+                
+            X = np.zeros_like(train_dists)
+            for col in range(train_dists.shape[1]):
+                X[:, col] = rankdata(train_dists[:, col])
+                if self.norm == "norm":
+                    X[:, col] /= X[:, col].max()
+            if self.norm == "orig":
+                X = train_dists
+            elif self.norm == "scaler":
+                scaler = StandardScaler()
+                X = scaler.fit_transform(train_dists)
+
+            if self.remove_corr:
+                feats = np.arange(X.shape[1])
+                if self.remove_alg == 1:
+                    removed = np.zeros_like(feats, dtype=bool)
+                    added = np.zeros_like(feats, dtype=bool)
+                    
+                    for f in feats:
+                        if removed[f]:
+                            continue
+                        added[f] = True
+                        corr_idx = np.argwhere((np.abs(np.corrcoef(X.T)[f]) > 0.8) & (np.arange(X.shape[1]) != f)).flatten()
+                        removed[corr_idx] = True
+                        print(f, corr_idx)
+                    print("added: ", np.argwhere(added))
+                    self.added = added
+                    X = X[:, self.added]
+
+                if self.remove_alg == 2:
+                    X_corr = np.corrcoef(X.T)
+                    d = sch.distance.pdist(X_corr)
+                    L = sch.linkage(d, method='complete')
+                    clusters = sch.fcluster(L, 0.3*d.max(), 'distance')
+    
+                    features = []
+                    for cluster in np.unique(clusters):
+                        cls_features = []
+                        cls_prr = []
+                        for f in np.argwhere(clusters == cluster).flatten():
+                            cls_features.append(f)
+                            cls_prr.append(np.abs(get_prr(train_dists[:, f], self.train_seq_metrics[dev_samples:])))
+                        features.append(cls_features[np.argmax(cls_prr)]) 
+                    self.added = np.zeros_like(feats, dtype=bool)
+                    self.added[features] = True
+                    X = X[:, self.added]
+                    print("added: ", np.argwhere(self.added))
+
+            if self.tgt_norm:
+                y = 1 - rankdata(self.train_seq_metrics[dev_samples:])
+                y[np.isnan(y)] = y[~np.isnan(y)].max()
+            else:
+                y = 1 - self.train_seq_metrics[dev_samples:]
+                y[np.isnan(y)] = 1
+            
+            if self.meta_model != "weights":
+                self.regressor.fit(X, y)
+            if self.meta_model == "LinReg":
+                print("COEF:", self.regressor.coef_)
+            self.is_fitted = True
+
+
+        eval_mds = []
+        for layer in self.tmds.keys():
+            md = self.tmds[layer](stats).reshape(-1)
+            k = 0
+            mean_md = []
+            for tokens in stats["greedy_tokens"]:
+                dists_i = md[k:k+len(tokens)]
+                k += len(tokens)
+                mean_md.append(np.mean(dists_i))
+            eval_mds.append(mean_md)
+        eval_dists = np.array(eval_mds).T
+        eval_dists[np.isnan(eval_dists)] = 0
+        print(eval_dists.shape)
+        if self.meta_model != "weights":
+            if self.remove_corr:
+                eval_dists = eval_dists[:, self.added]
+            ues = self.regressor.predict(eval_dists)
+        else:
+            ues = eval_dists @ self.weights
+        return ues
