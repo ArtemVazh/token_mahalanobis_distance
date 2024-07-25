@@ -76,40 +76,51 @@ class TokenMahalanobisDistance(Estimator):
         embeddings = create_cuda_tensor_from_numpy(
             stats[f"token_embeddings_{self.embeddings_type}{hidden_layer}"]
         )
-
+        print(str(self), stats.keys())
+        
         # compute centroids if not given
         if not self.is_fitted:
-            train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
-            if self.metric_thr > 0:
-                train_greedy_texts = stats[f"train_greedy_texts"]
-                train_greedy_tokens = stats[f"train_greedy_tokens"]
-                train_target_texts = stats[f"train_target_texts"]
-                self.train_token_metrics = np.concatenate([[self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]] * len(x_t) 
-                                                           for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
-                
-                if (self.train_token_metrics >= self.metric_thr).sum() > 10:
-                    train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
+            centroid_key = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}"
+            if centroid_key in stats.keys(): # to reduce number of stored centroid for multiple methods used the same data
+                self.centroid = stats[centroid_key]
+            else:
+                train_embeddings = create_cuda_tensor_from_numpy(
+                    stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                )
+                if self.metric_thr > 0:
+                    train_greedy_texts = stats[f"train_greedy_texts"]
+                    train_greedy_tokens = stats[f"train_greedy_tokens"]
+                    train_target_texts = stats[f"train_target_texts"]
+                    self.train_token_metrics = np.concatenate([[self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]] * len(x_t) 
+                                                            for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+                    
+                    if (self.train_token_metrics >= self.metric_thr).sum() > 10:
+                        train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
 
-            self.centroid = train_embeddings.mean(axis=0)
-            if self.parameters_path is not None:
-                torch.save(self.centroid, f"{self.full_path}/centroid.pt")
+                self.centroid = train_embeddings.mean(axis=0)
+                if self.parameters_path is not None:
+                    torch.save(self.centroid, f"{self.full_path}/centroid.pt")
+                stats[centroid_key] = self.centroid
 
         # compute inverse covariance matrix if not given
         if not self.is_fitted:
-            train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
+            covariance_key = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}"
+            if covariance_key in stats.keys(): # to reduce number of stored centroid for multiple methods used the same data
+                self.sigma_inv = stats[covariance_key]
+            else:
+                train_embeddings = create_cuda_tensor_from_numpy(
+                    stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                )
 
-            if self.metric_thr > 0:
-                if (self.train_token_metrics >= self.metric_thr).sum() > 10:
-                    train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
-            self.sigma_inv, _ = compute_inv_covariance(
-                self.centroid.unsqueeze(0), train_embeddings
-            )
-            if self.parameters_path is not None:
-                torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
+                if self.metric_thr > 0:
+                    if (self.train_token_metrics >= self.metric_thr).sum() > 10:
+                        train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
+                self.sigma_inv, _ = compute_inv_covariance(
+                    self.centroid.unsqueeze(0), train_embeddings
+                )
+                if self.parameters_path is not None:
+                    torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
+                stats[covariance_key] = self.sigma_inv
             self.is_fitted = True
 
         if torch.cuda.is_available():

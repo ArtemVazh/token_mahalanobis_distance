@@ -313,14 +313,13 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 self.regressor = Ridge(positive=self.positive)
             elif self.meta_model == "MLP":                
                 self.regressor = MLP(n_features=train_dists.shape[1])
-            #elif self.meta_model == "weights":
-            scores = []
-            for i in range(train_dists.shape[-1]):
-                scores.append(get_prr(train_dists[:, i], self.train_seq_metrics[dev_samples:]))
-            self.weights = np.array(scores)
-            print("\n\n weights: ", self.weights)
-            self.weights /= np.abs(self.weights).sum()
-            print("\n\n weights: ", self.weights)
+            elif self.meta_model == "weights":
+                scores = []
+                for i in range(train_dists.shape[-1]):
+                    scores.append(get_prr(train_dists[:, i], self.train_seq_metrics[dev_samples:]))
+                self.weights = np.array(scores)
+                self.weights /= np.abs(self.weights).sum()
+                print("\n\n weights: ", self.weights)
                 
             X = np.zeros_like(train_dists)
             for col in range(train_dists.shape[1]):
