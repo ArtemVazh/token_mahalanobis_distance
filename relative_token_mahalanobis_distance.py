@@ -77,7 +77,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
 
     def __str__(self):
         hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
-        return f"RelativeMahalanobisDistance_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
+        return f"RelativeTokenMahalanobisDistance_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
 
     def __call__(self, stats: Dict[str, np.ndarray], save_data: bool = True) -> np.ndarray:
         # take the embeddings
