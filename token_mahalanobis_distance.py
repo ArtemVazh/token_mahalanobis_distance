@@ -90,9 +90,19 @@ class TokenMahalanobisDistance(Estimator):
                     train_greedy_texts = stats[f"train_greedy_texts"]
                     train_greedy_tokens = stats[f"train_greedy_tokens"]
                     train_target_texts = stats[f"train_target_texts"]
-                    self.train_token_metrics = np.concatenate([[self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]] * len(x_t) 
-                                                            for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
                     
+                    metric_key = f"train_{self.metric_name}_{len(train_greedy_texts)}"
+                    if metric_key in stats.keys():
+                        print("USED", metric_key)
+                        self.train_token_metrics = stats[metric_key]
+                    else:
+                        print(stats.keys())
+                        print("COMPUTE", metric_key)
+                        self.train_token_metrics = np.concatenate([[self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]] * len(x_t)
+                                                                   for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+                        stats[metric_key] = self.train_token_metrics
+                        print(stats.keys())
+                        
                     if (self.train_token_metrics >= self.metric_thr).sum() > 10:
                         train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
 
