@@ -33,6 +33,7 @@ from lm_polygraph.ue_metrics.pred_rej_area import PredictionRejectionArea
 
 import scipy
 import scipy.cluster.hierarchy as sch
+from sklearn.decomposition import PCA
 
 prr = PredictionRejectionArea()
 
@@ -232,7 +233,10 @@ class LinRegTokenMahalanobisDistance(Estimator):
         self.parameters_path=parameters_path
         self.is_fitted = False
         self.metric_thr = metric_thr
-        self.metric = metric
+        if metric is not None:
+            self.metric = metric
+            if aggregated:
+                self.metric = AggregatedMetric(base_metric=self.metric)
         self.aggregation = aggregation
         self.metric_name = metric_name
         self.metric_md_name = metric_md_name
@@ -257,8 +261,13 @@ class LinRegTokenMahalanobisDistance(Estimator):
             train_greedy_texts = stats[f"train_greedy_texts"]
             train_greedy_tokens = stats[f"train_greedy_tokens"]
             train_target_texts = stats[f"train_target_texts"]
-            self.train_seq_metrics = np.array([self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0] if isinstance(y, str) else self.metric({"greedy_texts": [x], "target_texts": [y[0]]}, [y[0]], [y[0]])[0]
-                                                 for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+            metric_key = f"train_seq_{self.metric_name}_{len(train_greedy_texts)}"
+            if metric_key in stats.keys():
+                self.train_seq_metrics = stats[metric_key]
+            else:   
+                self.train_seq_metrics = np.array([self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]
+                                                  for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+                stats[metric_key] = self.train_seq_metrics
 
             train_mds = []
             dev_size = 0.5
@@ -292,6 +301,10 @@ class LinRegTokenMahalanobisDistance(Estimator):
                         train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
                         train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
                     
+                metric_key = f"train_{self.metric_md_name}_{len(train_greedy_texts)}"
+                if metric_key in stats.keys():
+                    train_stats[f"train_{self.metric_md_name}_{len(train_greedy_texts[:dev_samples])}"] = stats[metric_key][:dev_tokens]
+
                 md = self.tmds[layer](train_stats, save_data=False).reshape(-1)
                 self.tmds[layer].is_fitted = False
                 k = 0
@@ -349,7 +362,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
 
                 if self.remove_alg == 2:
                     X_corr = np.corrcoef(X.T)
-                    d = sch.distance.pdist(X_corr)
+                    d = sch.distance.pdist(X_corr, metric="cosine")
                     L = sch.linkage(d, method='complete')
                     clusters = sch.fcluster(L, 0.3*d.max(), 'distance')
     
@@ -366,12 +379,23 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     X = X[:, self.added]
                     print("added: ", np.argwhere(self.added))
 
+                if self.remove_alg == 3:
+                    self.pca = PCA(n_components=10)
+                    X = self.pca.fit_transform(X)
+                    
+                if self.remove_alg == 4:
+                    self.pca = PCA(n_components=X.shape[1])
+                    self.pca.fit(X)
+                    n_components = np.argwhere(np.cumsum(self.pca.explained_variance_ratio_) > 0.99).min()
+                    self.pca = PCA(n_components=n_components)
+                    X = self.pca.fit_transform(X)
+                
+            target = self.train_seq_metrics[dev_samples:]
+            target[np.isnan(target)] = 0
             if self.tgt_norm:
-                y = 1 - rankdata(self.train_seq_metrics[dev_samples:])
-                y[np.isnan(y)] = y[~np.isnan(y)].max()
+                y = 1 - rankdata(target)
             else:
-                y = 1 - self.train_seq_metrics[dev_samples:]
-                y[np.isnan(y)] = 1
+                y = 1 - target
             
             if self.meta_model != "weights":
                 self.regressor.fit(X, y)
@@ -393,9 +417,14 @@ class LinRegTokenMahalanobisDistance(Estimator):
         eval_dists = np.array(eval_mds).T
         eval_dists[np.isnan(eval_dists)] = 0
         print(eval_dists.shape)
+        if self.norm == "scaler":
+            eval_dists = scaler.transform(eval_dists)
+            
         if self.meta_model != "weights":
-            if self.remove_corr:
+            if self.remove_corr and (self.remove_alg < 3):
                 eval_dists = eval_dists[:, self.added]
+            elif self.remove_corr:
+                eval_dists = self.pca.transform(eval_dists)
             ues = self.regressor.predict(eval_dists)
         else:
             ues = eval_dists @ self.weights
