@@ -94,8 +94,9 @@ class RelativeTokenMahalanobisDistance(Estimator):
         # to obtain MD_0
 
         if not self.is_fitted:
-            centroid_key = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}"
-            if (centroid_key in stats.keys()) and save_data: # to reduce number of stored centroid for multiple methods used the same data
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            centroid_key = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.centroid_0 = stats[centroid_key]
             else:
                 background_train_embeddings = create_cuda_tensor_from_numpy(
@@ -108,8 +109,8 @@ class RelativeTokenMahalanobisDistance(Estimator):
                     stats[centroid_key] = self.centroid_0
 
         if not self.is_fitted:
-            covariance_key = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}"
-            if (covariance_key in stats.keys()) and save_data: # to reduce number of stored centroid for multiple methods used the same data
+            covariance_key = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.sigma_inv_0 = stats[covariance_key]
             else:
                 background_train_embeddings = create_cuda_tensor_from_numpy(
@@ -304,6 +305,9 @@ class RelativeTokenMahalanobisDistanceClaim(Estimator):
                 elif self.aggregation  == "sum":
                     tmd_scores[-1].append(claim_p_i.sum())
 
-        tmd_scores = np.array(tmd_scores)
-
+        if self.aggregation == "none":
+            tmd_scores = np.array(dists)
+        else:
+            tmd_scores = np.array(tmd_scores)
+            
         return tmd_scores

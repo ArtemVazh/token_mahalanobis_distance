@@ -16,8 +16,10 @@ from lm_polygraph.estimators.mahalanobis_distance import (
 )
 
 from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
-from token_mahalanobis_distance import TokenMahalanobisDistance
-from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance
+
+from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
+from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
+from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
 from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.ensemble import RandomForestRegressor
 from scipy.stats import rankdata
@@ -228,7 +230,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 self.tmds[layer] = RelativeTokenMahalanobisDistance(
                     embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated
                 )
-        
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
         self.is_fitted = False
@@ -305,7 +306,43 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 if metric_key in stats.keys():
                     train_stats[f"train_{self.metric_md_name}_{len(train_greedy_texts[:dev_samples])}"] = stats[metric_key][:dev_tokens]
 
+                if layer == -1:
+                    hidden_layer = ""
+                else:
+                    hidden_layer = f"_{layer}"
+            
+                centroid_key_ = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                covariance_key_ = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+
+                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+
+                if centroid_key_ in stats.keys():
+                    train_stats[centroid_key_] = stats[centroid_key_]
+                if covariance_key_ in stats.keys():
+                    train_stats[covariance_key_] = stats[covariance_key_]
+                if background_centroid_key_ in stats.keys():
+                    train_stats[background_centroid_key_] = stats[background_centroid_key_]
+                if background_covariance_key_ in stats.keys():
+                    train_stats[background_covariance_key_] = stats[background_covariance_key_]
+                
                 md = self.tmds[layer](train_stats, save_data=False).reshape(-1)
+
+                if "Relative" in self.ue:
+                    if centroid_key_ not in stats.keys():
+                        stats[centroid_key_] = self.tmds[layer].MD.centroid
+                    if covariance_key_ not in stats.keys():
+                        stats[covariance_key_] = self.tmds[layer].MD.sigma_inv  
+                    if background_centroid_key_ not in stats.keys():
+                        stats[background_centroid_key_] = self.tmds[layer].centroid_0
+                    if background_covariance_key_ not in stats.keys():
+                        stats[background_covariance_key_] = self.tmds[layer].sigma_inv_0
+                else:
+                    if centroid_key_ not in stats.keys():
+                        stats[centroid_key_] = self.tmds[layer].centroid
+                    if covariance_key_ not in stats.keys():
+                        stats[covariance_key_] = self.tmds[layer].sigma_inv
+
                 self.tmds[layer].is_fitted = False
                 k = 0
                 mean_md = []
@@ -317,8 +354,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
             train_dists = np.array(train_mds).T
             np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
             np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
-            print(train_dists, self.train_seq_metrics)
-            print("NAN:", np.isnan(train_dists).sum())
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
@@ -330,7 +365,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     scores.append(get_prr(train_dists[:, i], self.train_seq_metrics[dev_samples:]))
                 self.weights = np.array(scores)
                 self.weights /= np.abs(self.weights).sum()
-                print("\n\n weights: ", self.weights)
                 
             X = np.zeros_like(train_dists)
             for col in range(train_dists.shape[1]):
@@ -355,8 +389,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
                         added[f] = True
                         corr_idx = np.argwhere((np.abs(np.corrcoef(X.T)[f]) > 0.8) & (np.arange(X.shape[1]) != f)).flatten()
                         removed[corr_idx] = True
-                        print(f, corr_idx)
-                    print("added: ", np.argwhere(added))
                     self.added = added
                     X = X[:, self.added]
 
@@ -377,7 +409,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     self.added = np.zeros_like(feats, dtype=bool)
                     self.added[features] = True
                     X = X[:, self.added]
-                    print("added: ", np.argwhere(self.added))
 
                 if self.remove_alg == 3:
                     self.pca = PCA(n_components=10)
@@ -386,6 +417,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 if self.remove_alg == 4:
                     self.pca = PCA(n_components=X.shape[1])
                     self.pca.fit(X)
+                    
                     n_components = np.argwhere(np.cumsum(self.pca.explained_variance_ratio_) > 0.99).min()
                     self.pca = PCA(n_components=n_components)
                     X = self.pca.fit_transform(X)
@@ -399,8 +431,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
             
             if self.meta_model != "weights":
                 self.regressor.fit(X, y)
-            if self.meta_model == "LinReg":
-                print("COEF:", self.regressor.coef_)
             self.is_fitted = True
 
 
@@ -416,7 +446,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
             eval_mds.append(mean_md)
         eval_dists = np.array(eval_mds).T
         eval_dists[np.isnan(eval_dists)] = 0
-        print(eval_dists.shape)
         if self.norm == "scaler":
             eval_dists = scaler.transform(eval_dists)
             
@@ -429,3 +458,284 @@ class LinRegTokenMahalanobisDistance(Estimator):
         else:
             ues = eval_dists @ self.weights
         return ues
+
+class LinRegTokenMahalanobisDistance_Claim(Estimator):
+    def __init__(
+        self,
+        embeddings_type: str = "decoder",
+        parameters_path: str = None,
+        normalize: bool = False,
+        metric_thr: float = 0.0,
+        aggregation: str = "mean",
+        hidden_layers: List[int] = [0, -1],
+        metric = None,
+        metric_name: str = "",
+
+        metric_md = None,
+        metric_md_name: str = "",
+        
+        aggregated: bool = False,
+        positive: bool = True,
+        ue: str = "TokenMahalanobis",
+
+        meta_model: str = "LinReg",
+        norm: str = "norm",
+
+        tgt_norm: bool = False,
+        remove_corr: bool = False,
+        remove_alg: int = 2,        
+    ):
+        self.ue = ue
+        self.hidden_layers = hidden_layers
+        self.tmds = {}
+        dependencies = ["train_greedy_tokens", "train_target_texts",  "claims", "train_claims"]
+        for layer in self.hidden_layers:
+            if layer == -1:
+                dependencies += ["token_embeddings", "train_token_embeddings"]
+                if "relative" in ue.lower():
+                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+            else:
+                dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
+                if "relative" in ue.lower():
+                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+            if ue == "TokenMahalanobis":
+                self.tmds[layer] = TokenMahalanobisDistanceClaim(
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer
+                )
+            elif ue == "RelativeTokenMahalanobis":
+                self.tmds[layer] = RelativeTokenMahalanobisDistanceClaim(
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer
+                )
+                
+        super().__init__(dependencies, "claim")
+        self.parameters_path=parameters_path
+        self.is_fitted = False
+        self.metric_thr = metric_thr
+        if metric is not None:
+            self.metric = metric
+            if aggregated:
+                self.metric = AggregatedMetric(base_metric=self.metric)
+        self.aggregation = aggregation
+        self.metric_name = metric_name
+        self.metric_md_name = metric_md_name
+        self.embeddings_type=embeddings_type
+        self.positive=positive
+        self.meta_model=meta_model
+        self.norm=norm
+        self.tgt_norm=tgt_norm
+        self.remove_corr=remove_corr
+        self.remove_alg=remove_alg
+        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o")
+        os.makedirs(self.parameters_path, exist_ok=True)
+        
+    
+    def __str__(self):
+        hidden_layers = ",".join([str(x) for x in self.hidden_layers])
+        positive = "pos" if self.positive else ""
+        tgt_norm = "tgt_norm" if self.tgt_norm else ""
+        remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
+        return f"{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers} Claim ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
+
+    def _get_targets(self, greedy_tokens, claims, factcheck):
+        targets = []
+        for j in range(len(greedy_tokens)):
+            target = np.zeros_like(greedy_tokens[j]) + 1.0
+            true_tokens = []
+            false_tokens = []
+            for i, claim in enumerate(claims[j]):
+                if not np.isnan(factcheck[j][i]):
+                    for t in claim.aligned_token_ids:
+                         if factcheck[j][i] == 1:
+                             false_tokens.append(t)
+                         else:
+                             true_tokens.append(t)
+            final_true_tokens = np.array(list(set(true_tokens) - set(false_tokens)))
+            final_false_tokens = np.array(list(set(false_tokens) - set(true_tokens)))
+            if len(final_true_tokens):
+                target[final_true_tokens] = 1.0
+            if len(final_false_tokens):
+                target[final_false_tokens] = 0.0
+            target = np.clip(target, 0, 1)
+            targets.append(target)
+        return targets
+
+    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+        
+        if not self.is_fitted: 
+
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            train_greedy_tokens = stats[f"train_greedy_tokens"]
+            train_input_texts = stats[f"train_input_texts"]
+            train_claims = stats[f"train_claims"]
+            train_stats = {"claims": train_claims, "input_texts": train_input_texts}
+
+            if "factcheck" in stats.keys():
+                factcheck = stats["factcheck"]
+                self.train_token_metrics = stats["train_token_metrics"]
+            else:
+                factcheck = self.factcheck(train_stats, None, None)
+                self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, factcheck))
+                stats["factcheck"] = factcheck
+                stats["train_token_metrics"] = self.train_token_metrics
+            
+            train_mds = []
+            dev_size = 0.5
+            dev_samples = int(len(train_greedy_texts) * dev_size)
+            len_tokens = [len(tokens) for tokens in train_greedy_tokens]
+            dev_tokens = np.sum(len_tokens[:dev_samples])
+                
+            for layer in self.hidden_layers:
+                if layer == -1:
+                    train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
+                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
+                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
+                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
+                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[:dev_tokens],
+                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[dev_tokens:],
+                                   "claims": train_claims[dev_samples:],
+                                   "train_claims": train_claims[:dev_samples],
+                                   "train_input_texts": train_input_texts[:dev_samples],
+                                  }
+                    if "relative" in self.ue.lower(): 
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][:dev_tokens]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][dev_tokens:]
+                else:
+                    train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
+                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
+                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
+                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
+                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[:dev_tokens],
+                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[dev_tokens:],
+                                   "claims": train_claims[dev_samples:],
+                                   "train_claims": train_claims[:dev_samples],
+                                   "train_input_texts": train_input_texts[:dev_samples],
+                                  }
+                    if "relative" in self.ue.lower(): 
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
+
+                train_stats["factcheck"] = factcheck[:dev_samples]
+                train_stats["train_token_metrics"] = self.train_token_metrics[:dev_tokens]
+                
+                md = self.tmds[layer](train_stats).reshape(-1)
+                self.tmds[layer].is_fitted = False
+                train_mds.append(md)
+            train_dists = np.array(train_mds).T
+            print(train_dists.shape, self.train_token_metrics.shape)
+            np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
+            np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
+            train_dists[np.isnan(train_dists)] = 0
+            if self.meta_model == "LinReg":
+                self.regressor = Ridge(positive=self.positive)
+            elif self.meta_model == "MLP":                
+                self.regressor = MLP(n_features=train_dists.shape[1])
+            elif self.meta_model == "weights":
+                scores = []
+                for i in range(train_dists.shape[-1]):
+                    scores.append(get_prr(train_dists[:, i], self.train_token_metrics[dev_samples:]))
+                self.weights = np.array(scores)
+                self.weights /= np.abs(self.weights).sum()
+                
+            X = np.zeros_like(train_dists)
+            for col in range(train_dists.shape[1]):
+                X[:, col] = rankdata(train_dists[:, col])
+                if self.norm == "norm":
+                    X[:, col] /= X[:, col].max()
+            if self.norm == "orig":
+                X = train_dists
+            elif self.norm == "scaler":
+                scaler = StandardScaler()
+                X = scaler.fit_transform(train_dists)
+
+            if self.remove_corr:
+                feats = np.arange(X.shape[1])
+                if self.remove_alg == 1:
+                    removed = np.zeros_like(feats, dtype=bool)
+                    added = np.zeros_like(feats, dtype=bool)
+                    
+                    for f in feats:
+                        if removed[f]:
+                            continue
+                        added[f] = True
+                        corr_idx = np.argwhere((np.abs(np.corrcoef(X.T)[f]) > 0.8) & (np.arange(X.shape[1]) != f)).flatten()
+                        removed[corr_idx] = True
+                    self.added = added
+                    X = X[:, self.added]
+
+                if self.remove_alg == 2:
+                    X_corr = np.corrcoef(X.T)
+                    d = sch.distance.pdist(X_corr, metric="cosine")
+                    L = sch.linkage(d, method='complete')
+                    clusters = sch.fcluster(L, 0.3*d.max(), 'distance')
+    
+                    features = []
+                    for cluster in np.unique(clusters):
+                        cls_features = []
+                        cls_prr = []
+                        for f in np.argwhere(clusters == cluster).flatten():
+                            cls_features.append(f)
+                            cls_prr.append(np.abs(get_prr(train_dists[:, f], self.train_seq_metrics[dev_samples:])))
+                        features.append(cls_features[np.argmax(cls_prr)]) 
+                    self.added = np.zeros_like(feats, dtype=bool)
+                    self.added[features] = True
+                    X = X[:, self.added]
+
+                if self.remove_alg == 3:
+                    self.pca = PCA(n_components=10)
+                    X = self.pca.fit_transform(X)
+                    
+                if self.remove_alg == 4:
+                    self.pca = PCA(n_components=X.shape[1])
+                    self.pca.fit(X)
+                    
+                    n_components = np.argwhere(np.cumsum(self.pca.explained_variance_ratio_) > 0.99).min()
+                    self.pca = PCA(n_components=n_components)
+                    X = self.pca.fit_transform(X)
+                
+            target = self.train_token_metrics[dev_tokens:]
+            target[np.isnan(target)] = 0
+            if self.tgt_norm:
+                y = 1 - rankdata(target)
+            else:
+                y = 1 - target
+            
+            if self.meta_model != "weights":
+                self.regressor.fit(X, y)
+            self.is_fitted = True
+
+
+        eval_mds = []
+        for layer in self.tmds.keys():
+            md = self.tmds[layer](stats).reshape(-1)
+            eval_mds.append(md)
+        eval_dists = np.array(eval_mds).T
+        eval_dists[np.isnan(eval_dists)] = 0
+        if self.norm == "scaler":
+            eval_dists = scaler.transform(eval_dists)
+            
+        if self.meta_model != "weights":
+            if self.remove_corr and (self.remove_alg < 3):
+                eval_dists = eval_dists[:, self.added]
+            elif self.remove_corr:
+                eval_dists = self.pca.transform(eval_dists)
+            token_ues = self.regressor.predict(eval_dists)
+        else:
+            token_ues = eval_dists @ self.weights
+            
+        tmd_scores = []
+        k = 0
+        claims = stats["claims"]
+        for idx, tokens in enumerate(stats["greedy_tokens"]):
+            dists_i = token_ues[k:k+len(tokens)]
+            k += len(tokens)
+
+            tmd_scores.append([])
+            for claim in claims[idx]:
+                tokens = np.array(claim.aligned_token_ids)
+                claim_p_i = dists_i[tokens]
+                
+                if self.aggregation == "mean":
+                    tmd_scores[-1].append(claim_p_i.mean())
+                elif self.aggregation  == "sum":
+                    tmd_scores[-1].append(claim_p_i.sum())
+        return tmd_scores

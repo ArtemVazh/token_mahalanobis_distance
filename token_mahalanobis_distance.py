@@ -79,29 +79,25 @@ class TokenMahalanobisDistance(Estimator):
         
         # compute centroids if not given
         if not self.is_fitted:
-            centroid_key = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}"
-            if (centroid_key in stats.keys()) and save_data: # to reduce number of stored centroid for multiple methods used the same data
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            centroid_key = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.centroid = stats[centroid_key]
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
                     stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
                 if self.metric_thr > 0:
-                    train_greedy_texts = stats[f"train_greedy_texts"]
                     train_greedy_tokens = stats[f"train_greedy_tokens"]
                     train_target_texts = stats[f"train_target_texts"]
                     
                     metric_key = f"train_{self.metric_name}_{len(train_greedy_texts)}"
                     if metric_key in stats.keys():
-                        print("USED", metric_key)
                         self.train_token_metrics = stats[metric_key]
                     else:
-                        print(stats.keys())
-                        print("COMPUTE", metric_key)
                         self.train_token_metrics = np.concatenate([[self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]] * len(x_t)
                                                                    for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
                         stats[metric_key] = self.train_token_metrics
-                        print(stats.keys())
                         
                     if (self.train_token_metrics >= self.metric_thr).sum() > 10:
                         train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
@@ -114,8 +110,8 @@ class TokenMahalanobisDistance(Estimator):
 
         # compute inverse covariance matrix if not given
         if not self.is_fitted:
-            covariance_key = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}"
-            if (covariance_key in stats.keys()) and save_data: # to reduce number of stored centroid for multiple methods used the same data
+            covariance_key = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.sigma_inv = stats[covariance_key]
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
@@ -265,8 +261,15 @@ class TokenMahalanobisDistanceClaim(Estimator):
                 train_input_texts = stats[f"train_input_texts"]
                 train_claims = stats[f"train_claims"]
                 train_stats = {"claims": train_claims, "input_texts": train_input_texts}
-                factcheck = self.factcheck(train_stats, None, None)
-                self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, factcheck))
+
+                if "factcheck" in stats.keys():
+                    factcheck = stats["factcheck"]
+                    self.train_token_metrics = stats["train_token_metrics"]
+                else:
+                    factcheck = self.factcheck(train_stats, None, None)
+                    self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, factcheck))
+                    stats["factcheck"] = factcheck
+                    stats["train_token_metrics"] = self.train_token_metrics
                             
                 if (self.train_token_metrics >= self.metric_thr).sum() > 10:
                     train_embeddings = train_embeddings[self.train_token_metrics <= self.metric_thr]
