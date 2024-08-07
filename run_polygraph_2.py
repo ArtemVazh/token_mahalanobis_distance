@@ -388,33 +388,33 @@ def get_density_based_ue_methods(args, model_type):
                                                           aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
                                                           ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
 
-            #TMD + Orig + Accuracy + remove_corr_4
-            estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                          metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
-                                                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                                          ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=4)]
-            #TMD + Orig + AlignScore + remove_corr_4
-            estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                          metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
-                                                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                                          ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", tgt_norm=True, remove_corr=True, remove_alg=4)]
+            # #TMD + Orig + Accuracy + remove_corr_4
+            # estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+            #                                               metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
+            #                                               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                                               ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=4)]
+            # #TMD + Orig + AlignScore + remove_corr_4
+            # estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+            #                                               metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
+            #                                               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                                               ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", tgt_norm=True, remove_corr=True, remove_alg=4)]
 
-            #RelativeTMD + Orig + Accuracy + remove_corr_4
-            estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                          metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
-                                                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                                          ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=4)]
-            #RelativeTMD + Orig + AlignScore + remove_corr_4
-            estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                          metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
-                                                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                                          ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=4)]
+            # #RelativeTMD + Orig + Accuracy + remove_corr_4
+            # estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+            #                                               metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
+            #                                               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                                               ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=4)]
+            # #RelativeTMD + Orig + AlignScore + remove_corr_4
+            # estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+            #                                               metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
+            #                                               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                                               ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=4)]
 
-            #RelativeTMD + Orig + AlignScore
-            estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                          metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
-                                                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                                          ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig")]
+            # #RelativeTMD + Orig + AlignScore
+            # estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
+            #                                               metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
+            #                                               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                                               ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig")]
 
             
 

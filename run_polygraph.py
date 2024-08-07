@@ -36,7 +36,7 @@ from lm_polygraph.ue_metrics import *
 
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from token_knn import TokenKNN
-from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance
+from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance, LinRegTokenMahalanobisDistance_Claim
 
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
 
@@ -476,7 +476,17 @@ def get_ue_methods(args, model):
         for layer in layers:
             for thr in metric_thrs:
                 estimators += [TokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr),
-                               RelativeTokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr)]                    
+                               RelativeTokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr)]    
+
+        #TMD + Orig + Accuracy + remove_corr_3
+        estimators += [LinRegTokenMahalanobisDistance_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+        #RelativeTMD + Orig + Accuracy + remove_corr_3
+        estimators += [LinRegTokenMahalanobisDistance_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+
             
 
     additional_estimators = getattr(args, "additional_estimators", {})
