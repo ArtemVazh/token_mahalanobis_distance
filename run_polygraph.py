@@ -37,8 +37,11 @@ from lm_polygraph.ue_metrics import *
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from token_knn import TokenKNN
 from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance, LinRegTokenMahalanobisDistance_Claim
-
+from average_token_mahalanobis_distance_hybrid import LinRegTokenMahalanobisDistance_Hybrid_Claim
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
+
+from huq_msp_lrtmd import HUQ_LRTMD_Claim
+
 
 hydra_config = Path(os.environ["HYDRA_CONFIG"])
 
@@ -467,25 +470,132 @@ def get_ue_methods(args, model):
             # PerplexityClaim(),
             # MaxTokenEntropyClaim(),
             # PointwiseMutualInformationClaim(),
-            # PTrueClaim(),
-            # ClaimConditionedProbabilityClaim(nli_context="no_context"),
-            # ClaimConditionedProbabilityClaim(nli_context="fact_pref"),
+            PTrueClaim(),
+            ClaimConditionedProbabilityClaim(nli_context="no_context"),
+            ClaimConditionedProbabilityClaim(nli_context="fact_pref"),
         ]
         layers = getattr(args, "layers", [0, -1])
         metric_thrs = getattr(args, "metric_thrs", [0.0, 0.5])
         for layer in layers:
             for thr in metric_thrs:
                 estimators += [TokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr),
-                               RelativeTokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr)]    
+                               RelativeTokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr)]  
 
-        #TMD + Orig + Accuracy + remove_corr_3
+        #########################################################################
+        # LinReg
         estimators += [LinRegTokenMahalanobisDistance_Claim("decoder", parameters_path=parameters_path, 
                                                       aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
                                                       ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
-        #RelativeTMD + Orig + Accuracy + remove_corr_3
+       
         estimators += [LinRegTokenMahalanobisDistance_Claim("decoder", parameters_path=parameters_path, 
                                                       aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
                                                       ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+
+        estimators += [LinRegTokenMahalanobisDistance_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3)]
+        estimators += [LinRegTokenMahalanobisDistance_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3)]
+
+        #########################################################################
+        # LinReg + MSP
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3)]
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3)]
+
+        
+        #########################################################################
+        # HUQ
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3)]
+
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3)]
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3)]
+
+        #########################################################################
+        # LinReg + MSP + CCP
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True)]
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True)]
+
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True)]
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True)]
+
+        
+        #########################################################################
+        # HUQ + CCP
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True)]
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True)]
+
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True)]
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True)]
+
+        #########################################################################
+        # LinReg + MSP + CCP_FP
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+        estimators += [LinRegTokenMahalanobisDistance_Hybrid_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+
+        
+        #########################################################################
+        # HUQ + CCP_FP
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
+        estimators += [HUQ_LRTMD_Claim("decoder", parameters_path=parameters_path, 
+                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+                                                      ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=False, remove_alg=3, use_ccp=True, ccp_context="fact_pref")]
 
             
 
