@@ -30,6 +30,7 @@ class TokenMahalanobisDistance(Estimator):
         metric = None,
         metric_name: str = "",
         aggregated: bool = False,
+        device: str = "cuda"
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -47,6 +48,7 @@ class TokenMahalanobisDistance(Estimator):
         self.metric_thr = metric_thr
         self.aggregation = aggregation
         self.metric_name = metric_name
+        self.device = device
         if metric is not None:
             self.metric = metric
             if aggregated:
@@ -144,6 +146,10 @@ class TokenMahalanobisDistance(Estimator):
             self.sigma_inv.float(),
             embeddings.float(),
         )[:, 0]
+
+        if self.device == "cpu":
+            self.centroid = self.centroid.cpu()
+            self.sigma_inv = self.sigma_inv.cpu()
         
         k = 0
         agg_dists = []
@@ -184,6 +190,7 @@ class TokenMahalanobisDistanceClaim(Estimator):
         metric_thr: float = 0.0,
         aggregation: str = "mean",
         hidden_layer: int = -1,
+        device: str = "cuda"
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -200,6 +207,7 @@ class TokenMahalanobisDistanceClaim(Estimator):
         self.is_fitted = False
         self.metric_thr = metric_thr
         self.aggregation = aggregation
+        self.device = device
         self.factcheck = OpenAIFactCheck(openai_model="gpt-4o")
         
         # if self.parameters_path is not None:
@@ -240,7 +248,7 @@ class TokenMahalanobisDistanceClaim(Estimator):
             targets.append(target)
         return targets
 
-    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+    def __call__(self, stats: Dict[str, np.ndarray], save_data=True) -> np.ndarray:
         # take the embeddings
         if self.hidden_layer == -1:
             hidden_layer = ""
@@ -252,46 +260,60 @@ class TokenMahalanobisDistanceClaim(Estimator):
 
         # compute centroids if not given
         if not self.is_fitted:
-            train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
-            if self.metric_thr > 0:
-                train_greedy_texts = stats[f"train_greedy_texts"]
-                train_greedy_tokens = stats[f"train_greedy_tokens"]
-                train_input_texts = stats[f"train_input_texts"]
-                train_claims = stats[f"train_claims"]
-                train_stats = {"claims": train_claims, "input_texts": train_input_texts}
-
-                if "factcheck" in stats.keys():
-                    factcheck = stats["factcheck"]
-                    self.train_token_metrics = stats["train_token_metrics"]
-                else:
-                    factcheck = self.factcheck(train_stats, None, None)
-                    self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, factcheck))
-                    stats["factcheck"] = factcheck
-                    stats["train_token_metrics"] = self.train_token_metrics
-                            
-                if (self.train_token_metrics >= self.metric_thr).sum() > 10:
-                    train_embeddings = train_embeddings[self.train_token_metrics <= self.metric_thr]
-
-            self.centroid = train_embeddings.mean(axis=0)
-            if self.parameters_path is not None:
-                torch.save(self.centroid, f"{self.full_path}/centroid.pt")
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            centroid_key = f"centroid{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
+                self.centroid = stats[centroid_key]
+            else:
+                train_embeddings = create_cuda_tensor_from_numpy(
+                    stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                )
+                if self.metric_thr > 0:
+                    train_greedy_texts = stats[f"train_greedy_texts"]
+                    train_greedy_tokens = stats[f"train_greedy_tokens"]
+                    train_input_texts = stats[f"train_input_texts"]
+                    train_claims = stats[f"train_claims"]
+                    train_stats = {"claims": train_claims, "input_texts": train_input_texts}
+    
+                    if "factcheck" in stats.keys():
+                        factcheck = stats["factcheck"]
+                        self.train_token_metrics = stats["train_token_metrics"]
+                    else:
+                        factcheck = self.factcheck(train_stats, None, None)
+                        self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, factcheck))
+                        stats["factcheck"] = factcheck
+                        stats["train_token_metrics"] = self.train_token_metrics
+                                
+                    if (self.train_token_metrics >= self.metric_thr).sum() > 10:
+                        train_embeddings = train_embeddings[self.train_token_metrics <= self.metric_thr]
+    
+                self.centroid = train_embeddings.mean(axis=0)
+                if self.parameters_path is not None:
+                    torch.save(self.centroid, f"{self.full_path}/centroid.pt")
+                if save_data:
+                    stats[centroid_key] = self.centroid
 
         # compute inverse covariance matrix if not given
         if not self.is_fitted:
-            train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
-
-            if self.metric_thr > 0:
-                if (self.train_token_metrics >= self.metric_thr).sum() > 10:
-                    train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
-            self.sigma_inv, _ = compute_inv_covariance(
-                self.centroid.unsqueeze(0), train_embeddings
-            )
-            if self.parameters_path is not None:
-                torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
+            covariance_key = f"covariance{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
+                self.sigma_inv = stats[covariance_key]
+            else:
+                train_embeddings = create_cuda_tensor_from_numpy(
+                    stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                )
+    
+                if self.metric_thr > 0:
+                    if (self.train_token_metrics >= self.metric_thr).sum() > 10:
+                        train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
+                self.sigma_inv, _ = compute_inv_covariance(
+                    self.centroid.unsqueeze(0), train_embeddings
+                )
+                if self.parameters_path is not None:
+                    torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
+                    
+                if save_data:
+                    stats[covariance_key] = self.sigma_inv
             self.is_fitted = True
 
         if torch.cuda.is_available():
@@ -307,6 +329,10 @@ class TokenMahalanobisDistanceClaim(Estimator):
             self.sigma_inv.float(),
             embeddings.float(),
         )[:, 0]
+
+        if self.device == "cpu":
+            self.centroid = self.centroid.cpu()
+            self.sigma_inv = self.sigma_inv.cpu()
         
         k = 0
         tmd_scores = []

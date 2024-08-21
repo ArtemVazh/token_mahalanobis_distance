@@ -43,6 +43,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
         aggregated: bool = False,
         metric_name: str = "",
         hidden_layer: int = -1,
+        device: str = "cuda"
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -64,6 +65,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
         self.metric_thr = metric_thr
         self.aggregation = aggregation
         self.metric = metric
+        self.device = device
         
         if self.parameters_path is not None:
             self.full_path = f"{self.parameters_path}/rtmd_{self.hidden_layer}_{self.embeddings_type}_{self.aggregation}_{self.metric_name }_{self.metric_thr}"
@@ -146,6 +148,10 @@ class RelativeTokenMahalanobisDistance(Estimator):
             .numpy()
         )
 
+        if self.device == "cpu":
+            self.centroid_0 = self.centroid_0.cpu()
+            self.sigma_inv_0 = self.sigma_inv_0.cpu()
+
         # compute original MD
 
         md = self.MD(stats, save_data=save_data)
@@ -202,6 +208,7 @@ class RelativeTokenMahalanobisDistanceClaim(Estimator):
         aggregation: str = "mean",
         metric = None,
         hidden_layer: int = -1,
+        device: str = "cuda"
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -222,12 +229,13 @@ class RelativeTokenMahalanobisDistanceClaim(Estimator):
         self.metric_thr = metric_thr
         self.aggregation = aggregation
         self.metric = metric
+        self.device = device
 
     def __str__(self):
         hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
         return f"RelativeTokenMahalanobisDistanceClaim_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_thr})"
 
-    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+    def __call__(self, stats: Dict[str, np.ndarray], save_data: bool = True) -> np.ndarray:
         # take the embeddings
         if self.hidden_layer == -1:
             hidden_layer = ""
@@ -242,22 +250,36 @@ class RelativeTokenMahalanobisDistanceClaim(Estimator):
         # to obtain MD_0
 
         if not self.is_fitted:
-            background_train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
-            self.centroid_0 = background_train_embeddings.mean(axis=0)
-            if self.parameters_path is not None:
-                torch.save(self.centroid_0, f"{self.full_path}/centroid_0.pt")
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            centroid_key = f"background_centroid{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
+                self.centroid_0 = stats[centroid_key]
+            else:
+                background_train_embeddings = create_cuda_tensor_from_numpy(
+                    stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                )
+                self.centroid_0 = background_train_embeddings.mean(axis=0)
+                if self.parameters_path is not None:
+                    torch.save(self.centroid_0, f"{self.full_path}/centroid_0.pt")
+                if save_data:
+                    stats[centroid_key] = self.centroid_0
 
         if not self.is_fitted:
-            background_train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
-            self.sigma_inv_0, _ = compute_inv_covariance(
-                self.centroid_0.unsqueeze(0), background_train_embeddings
-            )
-            if self.parameters_path is not None:
-                torch.save(self.sigma_inv_0, f"{self.full_path}/sigma_inv_0.pt")
+            covariance_key = f"background_covariance{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts)}"
+            if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
+                self.sigma_inv_0 = stats[covariance_key]
+            else:
+                background_train_embeddings = create_cuda_tensor_from_numpy(
+                    stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                )
+                self.sigma_inv_0, _ = compute_inv_covariance(
+                    self.centroid_0.unsqueeze(0), background_train_embeddings
+                )
+                if self.parameters_path is not None:
+                    torch.save(self.sigma_inv_0, f"{self.full_path}/sigma_inv_0.pt")
+
+                if save_data:
+                    stats[covariance_key] = self.sigma_inv_0
             self.is_fitted = True
 
         if torch.cuda.is_available():
@@ -280,9 +302,13 @@ class RelativeTokenMahalanobisDistanceClaim(Estimator):
             .numpy()
         )
 
+        if self.device == "cpu":
+            self.centroid_0 = self.centroid_0.cpu()
+            self.sigma_inv_0 = self.sigma_inv_0.cpu()
+
         # compute original MD
 
-        md = self.MD(stats)
+        md = self.MD(stats, save_data=save_data)
 
         # RMD calculation
 

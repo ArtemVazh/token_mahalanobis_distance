@@ -207,10 +207,13 @@ class LinRegTokenMahalanobisDistance(Estimator):
 
         tgt_norm: bool = False,
         remove_corr: bool = False,
-        remove_alg: int = 2,        
+        remove_alg: int = 2,   
+
+        device: str = "cpu"
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
+        self.device = device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts"]
         for layer in self.hidden_layers:
@@ -224,11 +227,11 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device 
                 )
             elif ue == "RelativeTokenMahalanobis":
                 self.tmds[layer] = RelativeTokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device
                 )
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
@@ -257,7 +260,6 @@ class LinRegTokenMahalanobisDistance(Estimator):
         return f"{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
-        
         if not self.is_fitted: 
             train_greedy_texts = stats[f"train_greedy_texts"]
             train_greedy_tokens = stats[f"train_greedy_tokens"]
@@ -431,6 +433,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
             
             if self.meta_model != "weights":
                 self.regressor.fit(X, y)
+                self.y_preds = self.regressor.predict(X)
             self.is_fitted = True
 
 
@@ -570,12 +573,12 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
             train_stats = {"claims": train_claims, "input_texts": train_input_texts}
 
             if "factcheck" in stats.keys():
-                factcheck = stats["factcheck"]
+                self.factcheck_score = stats["factcheck"]
                 self.train_token_metrics = stats["train_token_metrics"]
             else:
-                factcheck = self.factcheck(train_stats, None, None)
-                self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, factcheck))
-                stats["factcheck"] = factcheck
+                self.factcheck_score = self.factcheck(train_stats, None, None)
+                self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, self.factcheck_score))
+                stats["factcheck"] = self.factcheck_score
                 stats["train_token_metrics"] = self.train_token_metrics
             
             train_mds = []
@@ -614,14 +617,66 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                         train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
                         train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
 
-                train_stats["factcheck"] = factcheck[:dev_samples]
+                train_stats["factcheck"] = self.factcheck_score[:dev_samples]
                 train_stats["train_token_metrics"] = self.train_token_metrics[:dev_tokens]
+
+                if layer == -1:
+                    hidden_layer = ""
+                else:
+                    hidden_layer = f"_{layer}"
+            
+                centroid_key_ = f"centroid{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                covariance_key_ = f"covariance{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+
+                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+
+                if centroid_key_ in stats.keys():
+                    train_stats[centroid_key_] = stats[centroid_key_]
+                if covariance_key_ in stats.keys():
+                    train_stats[covariance_key_] = stats[covariance_key_]
+                if background_centroid_key_ in stats.keys():
+                    train_stats[background_centroid_key_] = stats[background_centroid_key_]
+                if background_covariance_key_ in stats.keys():
+                    train_stats[background_covariance_key_] = stats[background_covariance_key_]
                 
-                md = self.tmds[layer](train_stats).reshape(-1)
+                md = self.tmds[layer](train_stats, save_data=False).reshape(-1)
+
+                if "Relative" in self.ue:
+                    if centroid_key_ not in stats.keys():
+                        stats[centroid_key_] = self.tmds[layer].MD.centroid
+                    if covariance_key_ not in stats.keys():
+                        stats[covariance_key_] = self.tmds[layer].MD.sigma_inv  
+                    if background_centroid_key_ not in stats.keys():
+                        stats[background_centroid_key_] = self.tmds[layer].centroid_0
+                    if background_covariance_key_ not in stats.keys():
+                        stats[background_covariance_key_] = self.tmds[layer].sigma_inv_0
+                else:
+                    if centroid_key_ not in stats.keys():
+                        stats[centroid_key_] = self.tmds[layer].centroid
+                    if covariance_key_ not in stats.keys():
+                        stats[covariance_key_] = self.tmds[layer].sigma_inv
+
                 self.tmds[layer].is_fitted = False
                 train_mds.append(md)
             train_dists = np.array(train_mds).T
-            print(train_dists.shape, self.train_token_metrics.shape)
+            tmd_scores = []
+            k = 0
+            for idx, tokens in enumerate(train_greedy_tokens[dev_samples:]):
+                dists_i = train_dists[k:k+len(tokens)]
+                k += len(tokens)
+    
+                tmd_scores.append([])
+                for claim in train_claims[dev_samples:][idx]:
+                    tokens = np.array(claim.aligned_token_ids)
+                    claim_p_i = dists_i[tokens]
+                    
+                    if self.aggregation == "mean":
+                        tmd_scores[-1].append(claim_p_i.mean(axis=0))
+                    elif self.aggregation  == "sum":
+                        tmd_scores[-1].append(claim_p_i.sum(axis=0))
+
+            train_dists = np.concatenate(tmd_scores)
             np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
             np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
             train_dists[np.isnan(train_dists)] = 0
@@ -691,8 +746,9 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                     n_components = np.argwhere(np.cumsum(self.pca.explained_variance_ratio_) > 0.99).min()
                     self.pca = PCA(n_components=n_components)
                     X = self.pca.fit_transform(X)
-                
-            target = self.train_token_metrics[dev_tokens:]
+
+            n_claims = len(np.concatenate(train_claims[dev_samples:]))
+            target = np.concatenate(self.factcheck_score)[-n_claims:]
             target[np.isnan(target)] = 0
             if self.tgt_norm:
                 y = 1 - rankdata(target)
@@ -701,6 +757,7 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
             
             if self.meta_model != "weights":
                 self.regressor.fit(X, y)
+                self.y_preds = self.regressor.predict(X)
             self.is_fitted = True
 
 
@@ -710,23 +767,11 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
             eval_mds.append(md)
         eval_dists = np.array(eval_mds).T
         eval_dists[np.isnan(eval_dists)] = 0
-        if self.norm == "scaler":
-            eval_dists = scaler.transform(eval_dists)
-            
-        if self.meta_model != "weights":
-            if self.remove_corr and (self.remove_alg < 3):
-                eval_dists = eval_dists[:, self.added]
-            elif self.remove_corr:
-                eval_dists = self.pca.transform(eval_dists)
-            token_ues = self.regressor.predict(eval_dists)
-        else:
-            token_ues = eval_dists @ self.weights
-            
         tmd_scores = []
         k = 0
         claims = stats["claims"]
         for idx, tokens in enumerate(stats["greedy_tokens"]):
-            dists_i = token_ues[k:k+len(tokens)]
+            dists_i = eval_dists[k:k+len(tokens)]
             k += len(tokens)
 
             tmd_scores.append([])
@@ -735,7 +780,30 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                 claim_p_i = dists_i[tokens]
                 
                 if self.aggregation == "mean":
-                    tmd_scores[-1].append(claim_p_i.mean())
+                    tmd_scores[-1].append(claim_p_i.mean(axis=0))
                 elif self.aggregation  == "sum":
-                    tmd_scores[-1].append(claim_p_i.sum())
+                    tmd_scores[-1].append(claim_p_i.sum(axis=0))
+        eval_dists = np.concatenate(tmd_scores)
+        
+        if self.norm == "scaler":
+            eval_dists = scaler.transform(eval_dists)
+            
+        if self.meta_model != "weights":
+            if self.remove_corr and (self.remove_alg < 3):
+                eval_dists = eval_dists[:, self.added]
+            elif self.remove_corr:
+                eval_dists = self.pca.transform(eval_dists)
+            claim_ues = self.regressor.predict(eval_dists)
+        else:
+            claim_ues = eval_dists @ self.weights
+
+        tmd_scores = []
+        claims = stats["claims"]
+        k = 0
+        for idx, tokens in enumerate(stats["greedy_tokens"]):
+            tmd_scores.append([])
+            for _ in claims[idx]:
+                tmd_scores[-1].append(claim_ues[k])
+                k += 1
+            
         return tmd_scores
