@@ -823,9 +823,9 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
             target = np.concatenate(self.factcheck_score)[-n_claims:]
             target[np.isnan(target)] = 0
             if self.tgt_norm:
-                y = 1 - rankdata(target)
+                y = rankdata(target)
             else:
-                y = 1 - target
+                y = target
             
             if self.meta_model != "weights":
                 self.regressor.fit(X, y)
