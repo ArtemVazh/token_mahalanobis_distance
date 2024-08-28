@@ -139,7 +139,7 @@ class Dataset:
         """
         csv = pd.read_csv(csv_path)
         x = csv[x_column].tolist()
-        y = csv[y_column].tolist()
+        y = [str(t) for t in csv[y_column].tolist()]
 
         if len(prompt):
             x = [prompt.format(text=text) for text in x]
