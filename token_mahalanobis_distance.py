@@ -49,6 +49,7 @@ class TokenMahalanobisDistance(Estimator):
         self.aggregation = aggregation
         self.metric_name = metric_name
         self.device = device
+        self.aggregated = aggregated
         if metric is not None:
             self.metric = metric
             if aggregated:
@@ -97,8 +98,17 @@ class TokenMahalanobisDistance(Estimator):
                     if metric_key in stats.keys():
                         self.train_token_metrics = stats[metric_key]
                     else:
-                        self.train_token_metrics = np.concatenate([[self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]] * len(x_t)
-                                                                   for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+                        metrics = []
+                        for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens):
+                            if isinstance(y, list) and (not self.aggregated):
+                                y_ = y[0]
+                            elif isinstance(y, str) and (self.aggregated):
+                                y_ = [y]
+                            else:
+                                y_ = y
+                            metrics.append([self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0]] * len(x_t))
+                            
+                        self.train_token_metrics = np.concatenate(metrics)
                         stats[metric_key] = self.train_token_metrics
                         
                     if (self.train_token_metrics >= self.metric_thr).sum() > 10:
