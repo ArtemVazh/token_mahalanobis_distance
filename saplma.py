@@ -133,7 +133,7 @@ def cross_val_hp(X, y, model_init, params, regression=False):
         print(param, "SCORE:", scores_mean)
     print("BEST:", best_params, "BEST SCORE:", scores_mean)
     if best_params is None:
-       best_params = itertools.product(*params.values())[0]
+       best_params = list(itertools.product(*params.values()))[0]
     return best_params
 
 
