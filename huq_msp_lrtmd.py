@@ -40,6 +40,7 @@ from sklearn.decomposition import PCA
 from lm_polygraph.estimators.max_probability import MaximumSequenceProbability
 from lm_polygraph.estimators.claim.max_probability import MaximumClaimProbability
 from lm_polygraph.estimators.claim.claim_conditioned_probability import ClaimConditionedProbabilityClaim
+from tad import TAD, TADClaim
 
 prr = PredictionRejectionArea()
 
@@ -130,7 +131,9 @@ class HUQ_LRTMD(Estimator):
 
         tgt_norm: bool = False,
         remove_corr: bool = False,
-        remove_alg: int = 2,   
+        remove_alg: int = 2,  
+
+        use_tad: bool = False,
 
         device: str = "cpu"
     ):
@@ -139,6 +142,7 @@ class HUQ_LRTMD(Estimator):
         self.device = device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts"]
+        dependencies += ["attention_features", "train_attention_features", "train_greedy_log_likelihoods"]
         for layer in self.hidden_layers:
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
@@ -172,13 +176,17 @@ class HUQ_LRTMD(Estimator):
                                                  ue=ue, positive=positive, meta_model=meta_model, norm=norm, 
                                                  remove_corr=remove_corr, remove_alg=remove_alg, device=device)
         self.msp = MaximumSequenceProbability()
+        self.use_tad=use_tad
+        self.tad = TAD(regression_model="LinReg", ignore_special_tokens=False, aggregation="sum(log(p_i))", clip_y=1, 
+                       use_alignscore=True, aggregated=aggregated, cross_val=True, parameters_path=parameters_path)
     
     def __str__(self):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         positive = "pos" if self.positive else ""
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
         remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
-        return f"HUQ-{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
+        use_tad = f"+tad" if self.use_tad else ""
+        return f"HUQ-{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers}{use_tad} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         if not self.is_fitted: 
@@ -192,7 +200,26 @@ class HUQ_LRTMD(Estimator):
             
             md_eval = self.md(stats)
             self.train_md = self.md.y_preds
-            self.train_msp = np.array(self.msp({"greedy_log_likelihoods": stats[f"train_greedy_log_likelihoods"][dev_samples:]}))
+            if self.use_tad:
+                tad_stats = {
+                    "tokenizer": stats["tokenizer"],
+                    "greedy_texts": stats["train_greedy_texts"][dev_samples:],
+                    "greedy_tokens": stats["train_greedy_tokens"][dev_samples:],
+                    "greedy_log_probs": stats["train_greedy_log_probs"][dev_samples:],
+                    "greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][dev_samples:],
+                    "attention_features": stats["train_attention_features"][dev_tokens-dev_samples:],
+                    "train_input_texts": stats["train_input_texts"][:dev_samples],
+                    "train_target_texts": stats["train_target_texts"][:dev_samples],
+                    "train_greedy_texts": stats["train_greedy_texts"][:dev_samples],
+                    "train_greedy_tokens": stats["train_greedy_tokens"][:dev_samples],
+                    "train_greedy_log_probs": stats["train_greedy_log_probs"][:dev_samples],
+                    "train_greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][:dev_samples],
+                    "train_attention_features": stats["train_attention_features"][:dev_tokens-dev_samples],
+                }
+                self.train_msp = np.array(self.tad(tad_stats))
+                self.tad.is_fitted = False
+            else:
+                self.train_msp = np.array(self.msp({"greedy_log_likelihoods": stats[f"train_greedy_log_likelihoods"][dev_samples:]}))
 
             metrics = self.md.train_seq_metrics[dev_samples:]
             best_prr, self.t_min_best, self.t_max_best, self.alpha_best = grid_search_hp(self.train_md, self.train_msp, metrics, target_metric=prr)
@@ -200,8 +227,11 @@ class HUQ_LRTMD(Estimator):
             self.is_fitted = True            
         else: 
             md_eval = self.md(stats)
-            
-        msp_eval = np.array(self.msp({"greedy_log_likelihoods": stats[f"greedy_log_likelihoods"]}))
+
+        if self.use_tad:
+            msp_eval = np.array(self.tad(stats))
+        else:
+            msp_eval = np.array(self.msp({"greedy_log_likelihoods": stats[f"greedy_log_likelihoods"]}))
         msp_eval_plus = np.concatenate([np.array(msp_eval), self.train_msp])
         md_eval_plus = np.concatenate([np.array(md_eval), self.train_md])
         

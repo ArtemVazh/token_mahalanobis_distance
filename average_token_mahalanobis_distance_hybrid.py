@@ -43,6 +43,7 @@ from lm_polygraph.estimators.claim.claim_conditioned_probability import ClaimCon
 import scipy
 import scipy.cluster.hierarchy as sch
 from sklearn.decomposition import PCA
+from tad import TAD, TADClaim
 
 prr = PredictionRejectionArea()
 
@@ -214,7 +215,9 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
 
         tgt_norm: bool = False,
         remove_corr: bool = False,
-        remove_alg: int = 2,   
+        remove_alg: int = 2,  
+
+        use_tad: bool = False,
 
         device: str = "cpu"
     ):
@@ -223,6 +226,8 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
         self.device = device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts"]
+        dependencies += ["attention_features", "train_attention_features", "train_greedy_log_likelihoods"]
+
         for layer in self.hidden_layers:
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
@@ -261,13 +266,18 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
         self.remove_alg=remove_alg
         self.msp = MaximumSequenceProbability()
         self.ent = EntropyCalculator()
+        self.use_tad=use_tad
+        self.tad = TAD(regression_model="LinReg", ignore_special_tokens=False, aggregation="sum(log(p_i))", clip_y=1, 
+                       use_alignscore=True, aggregated=aggregated, cross_val=True, parameters_path=parameters_path)
+
     
     def __str__(self):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         positive = "pos" if self.positive else ""
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
         remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
-        return f"Hybrid{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
+        use_tad = f"+tad" if self.use_tad else ""
+        return f"Hybrid{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers}{use_tad} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         
@@ -449,8 +459,27 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
 
             msp = np.array(self.msp({"greedy_log_likelihoods": train_greedy_log_likelihoods[dev_samples:]}))
             ent = np.array([np.mean(x) for x in self.ent({"greedy_log_probs": train_greedy_log_probs[dev_samples:]})["entropy"]])
-
-            X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1)])
+            if self.use_tad:
+                tad_stats = {
+                    "tokenizer": stats["tokenizer"],
+                    "greedy_texts": stats["train_greedy_texts"][dev_samples:],
+                    "greedy_tokens": stats["train_greedy_tokens"][dev_samples:],
+                    "greedy_log_probs": stats["train_greedy_log_probs"][dev_samples:],
+                    "greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][dev_samples:],
+                    "attention_features": stats["train_attention_features"][dev_tokens-dev_samples:],
+                    "train_input_texts": stats["train_input_texts"][:dev_samples],
+                    "train_target_texts": stats["train_target_texts"][:dev_samples],
+                    "train_greedy_texts": stats["train_greedy_texts"][:dev_samples],
+                    "train_greedy_tokens": stats["train_greedy_tokens"][:dev_samples],
+                    "train_greedy_log_probs": stats["train_greedy_log_probs"][:dev_samples],
+                    "train_greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][:dev_samples],
+                    "train_attention_features": stats["train_attention_features"][:dev_tokens-dev_samples],
+                }
+                tad = np.array(self.tad(tad_stats))
+                self.tad.is_fitted = False
+                X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1), tad.reshape(-1, 1)])
+            else:
+                X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1)])
             
             target = self.train_seq_metrics[dev_samples:]
             target[np.isnan(target)] = 0
@@ -488,7 +517,11 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
             msp = np.array(self.msp({"greedy_log_likelihoods": stats["greedy_log_likelihoods"]}))
             ent = np.array([np.mean(x) for x in self.ent({"greedy_log_probs": stats["greedy_log_probs"]})["entropy"]])
 
-            eval_dists = np.hstack([eval_dists, msp.reshape(-1, 1), ent.reshape(-1, 1)])
+            if self.use_tad:
+                tad = np.array(self.tad(stats))
+                eval_dists = np.hstack([eval_dists, msp.reshape(-1, 1), ent.reshape(-1, 1), tad.reshape(-1, 1)])
+            else:
+                eval_dists = np.hstack([eval_dists, msp.reshape(-1, 1), ent.reshape(-1, 1)])
             
             ues = self.regressor.predict(eval_dists)
         else:
