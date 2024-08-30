@@ -18,6 +18,15 @@ from sklearn.model_selection import train_test_split
 from torchvision import models
 from transformers import set_seed
 
+def seed_everything(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 class GRUNet(nn.Module):
     def __init__(self, emb_dim, input_dim=1, hidden_dim1=128, hidden_dim2=64, feature_dim=32, dropout=0.5):
         super(GRUNet, self).__init__()
@@ -65,7 +74,6 @@ class TriDataset(torch_data.Dataset):
         return len(self.labels)
 
     def __getitem__(self, index):
-
         anchor = self.features[index]
         anchor_label = self.labels[index]
 
@@ -291,14 +299,17 @@ def predict_model(model, test_loader, support_loader, act_dim, squeeze_dim=1, su
             dist = F.pairwise_distance(anchor_embedding, support_set_output, p=2)
             if return_dist:
                 correct_dist = dist[support_set_labels == 1]
-                y_pred.append(correct_dist.min().item())
+                if len(correct_dist):
+                    y_pred.append(correct_dist.min().item())
+                else:
+                    y_pred.append(1 - dist.min().item())
             else:
                 pred = support_set_labels[torch.argmin(dist, -1)]
                 y_pred.append(int(pred))
     return y_pred, support_set_labels, support_set_output
     
 def train_model(model, train_loader, dev_loader, support_loader, act_dim, squeeze_dim=1, epochs=30):
-    torch.manual_seed(42)
+    seed_everything(42)
     criterion = nn.TripletMarginLoss(margin=1.0, p=2)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     highest_acc = 0
@@ -311,12 +322,12 @@ def train_model(model, train_loader, dev_loader, support_loader, act_dim, squeez
             anchor = anchor.unsqueeze(squeeze_dim).cuda()
             positive = positive.unsqueeze(squeeze_dim).cuda()
             negative = negative.unsqueeze(squeeze_dim).cuda()
-
             optimizer.zero_grad()
             anchor_embedding = model(anchor, act_dim)
             positive_embedding = model(positive, act_dim)
             negative_embedding = model(negative, act_dim)
             loss = criterion(anchor_embedding, positive_embedding, negative_embedding)
+            
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -382,7 +393,7 @@ class LLMFactoscope(Estimator):
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         if not self.is_fitted: 
-            set_seed(42)
+            seed_everything(42)
             train_greedy_texts = stats[f"train_greedy_texts"]
             train_greedy_tokens = stats[f"train_greedy_tokens"]
             train_target_texts = stats[f"train_target_texts"]
@@ -421,7 +432,7 @@ class LLMFactoscope(Estimator):
             
             train_indices, dev_indices = train_test_split(list(range(len(self.seq_metrics))), test_size=0.2, random_state=42)
             train_indices, support_indices = train_test_split(train_indices, test_size=0.2, random_state=42)
-            
+           
             train_seq_metrics = self.seq_metrics[train_indices]
             support_seq_metrics = self.seq_metrics[support_indices]
             dev_seq_metrics = self.seq_metrics[dev_indices]
@@ -453,21 +464,20 @@ class LLMFactoscope(Estimator):
             
             dev_embeddings_processed, _, _ = process_activation_data(dev_embeddings, self.mean, self.std)
             dev_final_output_ranks_processed = process_rank_data(dev_final_output_ranks)
-            
+
             prob_resnet_model = models.resnet18(pretrained=False, num_classes=self.emb_dim).train().cuda()
             prob_resnet_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False).cuda()
-            
+
             emb_dist_resnet_model = models.resnet18(pretrained=False, num_classes=self.emb_dim).train().cuda()
             emb_dist_resnet_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False).cuda()
             
-            torch.manual_seed(42)
             grunet_model = GRUNet(emb_dim=self.emb_dim).train().cuda()
-            
+
             act_resnet_model = models.resnet18(pretrained=False, num_classes=self.emb_dim).cuda()
             act_resnet_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False).cuda()
             
             combined_model = CombinedTriNet(act_resnet_model, grunet_model, emb_dist_resnet_model, prob_resnet_model, emb_dim=self.emb_dim).cuda()  
-            
+          
             train_data = np.concatenate((train_embeddings_processed, train_final_output_ranks_processed,
                                          train_topk_tokens_distance, train_topk_prob), axis=2)
             
@@ -484,7 +494,6 @@ class LLMFactoscope(Estimator):
             train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True)
             self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False)
             dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False)
-        
             self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, train_embeddings_processed.shape[-1])
             self.support_set_labels, self.support_set_output = None, None
             self.is_fitted = True
