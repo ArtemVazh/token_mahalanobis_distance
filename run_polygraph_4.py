@@ -39,7 +39,9 @@ from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance
 from average_token_mahalanobis_distance_hybrid import LinRegTokenMahalanobisDistance_Hybrid
 from huq_msp_lrtmd import HUQ_LRTMD
 from saplma import SAPLMA, SAPLMA_truefalse
+from saplma_meta import SAPLMA_meta
 from factoscope import LLMFactoscope
+from eigenscore import EigenScore
 
 
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
@@ -356,51 +358,52 @@ def get_density_based_ue_methods(args, model_type):
 
             estimators += [LLMFactoscope(metric=metrics[0], metric_name=metrics_names[0], hidden_layers=layers, return_dist=False)]
             estimators += [LLMFactoscope(metric=metrics[0], metric_name=metrics_names[0], hidden_layers=layers, return_dist=True)]
-            estimators += [LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=parameters_path, 
-                          metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
-                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                          ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", tgt_norm=True, remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=True)]
-            estimators += [LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=parameters_path, 
-                          metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
-                          aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                          ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", tgt_norm=True, remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=False)]
-            estimators += [HUQ_LRTMD("decoder", parameters_path=parameters_path, 
-                                      metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
-                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=True)]
-            estimators += [HUQ_LRTMD("decoder", parameters_path=parameters_path, 
-                                      metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
-                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
-                                      ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=False)]
+            estimators += [EigenScore()]
+            # estimators += [LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=parameters_path, 
+            #               metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
+            #               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #               ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", tgt_norm=True, remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=True)]
+            # estimators += [LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=parameters_path, 
+            #               metric=metrics[1], metric_name=metrics_names[1], metric_md=metrics[1], metric_md_name=metrics_names[1], 
+            #               aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #               ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", tgt_norm=True, remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=False)]
+            # estimators += [HUQ_LRTMD("decoder", parameters_path=parameters_path, 
+            #                           metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
+            #                           aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                           ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=True)]
+            # estimators += [HUQ_LRTMD("decoder", parameters_path=parameters_path, 
+            #                           metric=metrics[0], metric_name=metrics_names[0], metric_md=metrics[0], metric_md_name=metrics_names[0], 
+            #                           aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=metric_thrs[-1], aggregation="mean",
+            #                           ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, device=getattr(args, "md_device", "cuda"), use_tad=False)]
             
             
-            if getattr(args, "use_truefalse_dataset", False):
-                for layer in layers:
-                    estimators += [
-                            SAPLMA_truefalse("decoder", parameters_path=None, aggregated=False, hidden_layer=layer, device=getattr(args, "md_device", "cuda")),
-                        ]
-            else:                
-                for m, m_name in zip(metrics, metrics_names):
-                    estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device=getattr(args, "md_device", "cuda"), cv_hp=False)]
-                    for layer in layers:
-                        estimators += [
-                            SAPLMA("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, device=getattr(args, "md_device", "cuda"), cv_hp=False),
-                            SAPLMA("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, device=getattr(args, "md_device", "cuda"), cv_hp=True)
-                        ]
-                        for agg in aggregations:
-                            if 0 in metric_thrs:
-                                estimators += [
-                                        TokenMahalanobisDistance("decoder", parameters_path=None, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg, device=getattr(args, "md_device", "cuda")),
-                                        RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg, device=getattr(args, "md_device", "cuda")),
-                                    ]    
-                                metric_thrs.remove(0)                
-                            for k, thr in enumerate(metric_thrs):
-                                if (k > 0) and (m_name=="Accuracy"):
-                                    continue
-                                estimators += [
-                                    TokenMahalanobisDistance("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg, device=getattr(args, "md_device", "cuda")),
-                                    RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg, device=getattr(args, "md_device", "cuda")),  
-                                ]
+            # if getattr(args, "use_truefalse_dataset", False):
+            #     for layer in layers:
+            #         estimators += [
+            #                 SAPLMA_truefalse("decoder", parameters_path=None, aggregated=False, hidden_layer=layer, device=getattr(args, "md_device", "cuda")),
+            #             ]
+            # else:                
+            #     for m, m_name in zip(metrics, metrics_names):
+            #         estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device=getattr(args, "md_device", "cuda"), cv_hp=False)]
+            #         for layer in layers:
+            #             estimators += [
+            #                 SAPLMA("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, device=getattr(args, "md_device", "cuda"), cv_hp=False),
+            #                 SAPLMA("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, device=getattr(args, "md_device", "cuda"), cv_hp=True)
+            #             ]
+            #             for agg in aggregations:
+            #                 if 0 in metric_thrs:
+            #                     estimators += [
+            #                             TokenMahalanobisDistance("decoder", parameters_path=None, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg, device=getattr(args, "md_device", "cuda")),
+            #                             RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg, device=getattr(args, "md_device", "cuda")),
+            #                         ]    
+            #                     metric_thrs.remove(0)                
+            #                 for k, thr in enumerate(metric_thrs):
+            #                     if (k > 0) and (m_name=="Accuracy"):
+            #                         continue
+            #                     estimators += [
+            #                         TokenMahalanobisDistance("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg, device=getattr(args, "md_device", "cuda")),
+            #                         RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg, device=getattr(args, "md_device", "cuda")),  
+            #                     ]
 
     return estimators
 
