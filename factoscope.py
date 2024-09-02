@@ -376,7 +376,7 @@ class LLMFactoscope(Estimator):
         super().__init__(dependencies, "sequence")
         self.is_fitted = False
         self.metric_thr = metric_thr
-        self.aggregated=aggregated
+        self.aggregated = aggregated
         if metric is not None:
             self.metric = metric
             if aggregated:
@@ -406,7 +406,10 @@ class LLMFactoscope(Estimator):
                     y_ = [y]
                 else:
                     y_ = y
-                metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0])
+                if self.metric_name == "Accuracy":
+                    metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0])
+                else:
+                    metrics.append(int(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0] > self.metric_thr))
             self.seq_metrics = np.array(metrics)
             
             #n_instances, n_layers
