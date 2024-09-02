@@ -105,6 +105,7 @@ class SAPLMA_meta(Estimator):
                                    f"embeddings_{self.embeddings_type}_{layer}": train_embeddings[dev_samples:],
                                   }
                 score = self.saplmas[layer](train_stats).reshape(-1)
+                self.saplmas[layer].is_fitted = False
                 train_saplmas.append(score)
             train_scores = np.array(train_saplmas).T
             self.ue_predictor.fit(train_scores, 1 - self.train_seq_metrics[dev_samples:])
@@ -118,68 +119,4 @@ class SAPLMA_meta(Estimator):
         eval_scores[np.isnan(eval_scores)] = 0
         ue = self.ue_predictor.predict(eval_scores)
 
-        return ue
-    
-class SAPLMA_truefalse(Estimator):
-    ## use only with original truefalse dataset
-    def __init__(
-        self,
-        embeddings_type: str = "decoder",
-        parameters_path: str = None,
-        normalize: bool = False,
-        aggregation: str = "mean",
-        hidden_layer: int = -1,
-        metric = None,
-        metric_name: str = "",
-        aggregated: bool = False,
-        device: str = "cuda"
-    ):
-        self.hidden_layer = hidden_layer
-        if self.hidden_layer == -1:
-            super().__init__(["train_source_embeddings", "embeddings", "train_target_texts"], "sequence")
-        else:
-            super().__init__([f"train_source_embeddings_{self.hidden_layer}", f"embeddings_{self.hidden_layer}", "train_target_texts"], "sequence")
-        self.centroid = None
-        self.sigma_inv = None
-        self.parameters_path = parameters_path
-        self.embeddings_type = embeddings_type
-        self.normalize = normalize
-        self.min = 1e100
-        self.max = -1e100
-        self.is_fitted = False
-        self.aggregation = aggregation
-        self.metric_name = metric_name
-        self.device = device
-        self.regression = True if metric_name!="Accuracy" else False
-        self.ue_predictor = MLP(regression=self.regression)
-        if metric is not None:
-            self.metric = metric
-            if aggregated:
-                self.metric = AggregatedMetric(base_metric=self.metric)
-
-    def __str__(self):
-        hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
-        return f"SAPLMA_truefalse_{self.embeddings_type}{hidden_layer}"
-
-    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
-        # take the embeddings
-        if self.hidden_layer == -1:
-            hidden_layer = ""
-        else:
-            hidden_layer = f"_{self.hidden_layer}"            
-        embeddings = create_cuda_tensor_from_numpy(
-            stats[f"embeddings_{self.embeddings_type}{hidden_layer}"]
-        )
-        
-        # compute centroids if not given
-        if not self.is_fitted:
-            self.train_seq_metrics = np.array([int(x) for x in stats[f"train_target_texts"]])
-            train_embeddings = create_cuda_tensor_from_numpy(
-                stats[f"train_source_embeddings_{self.embeddings_type}{hidden_layer}"]
-            )
-            self.ue_predictor = MLP(n_features=train_embeddings.shape[-1], regression=self.regression)
-            self.ue_predictor.fit(train_embeddings, 1 - self.train_seq_metrics)
-            self.is_fitted = True
-                
-        ue = self.ue_predictor.predict(embeddings)
         return ue
