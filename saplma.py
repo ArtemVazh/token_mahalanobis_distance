@@ -60,8 +60,14 @@ class MLP:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def fit(self, X, y):
-        X_torch = torch.tensor(X, dtype=torch.float32)
-        y_torch = torch.tensor(y, dtype=torch.float32).reshape(-1, 1)
+        if not isinstance(X, torch.Tensor):
+            X_torch = torch.tensor(X, dtype=torch.float32)
+        else:
+            X_torch = X.clone().detach().float()
+        if not isinstance(y, torch.Tensor):
+            y_torch = torch.tensor(y, dtype=torch.float32).reshape(-1, 1)
+        else:
+            y_torch = y_torch.clone().detach().float()
         batch_start = torch.arange(0, len(X), self.batch_size)
         self.model.to(self.device)
         for epoch in tqdm(range(self.n_epochs)):
@@ -76,7 +82,10 @@ class MLP:
                 self.optimizer.step()
                 
     def predict(self, X):
-        X_torch = torch.tensor(X, dtype=torch.float32)
+        if not isinstance(X, torch.Tensor):
+            X_torch = torch.tensor(X, dtype=torch.float32)
+        else:
+            X_torch = X.clone().detach().float()
         batch_start = torch.arange(0, len(X), self.batch_size)
         self.model.eval()
         prediction = []

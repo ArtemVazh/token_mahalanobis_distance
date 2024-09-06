@@ -69,9 +69,9 @@ class SAPLMA_meta(Estimator):
                 self.metric = AggregatedMetric(base_metric=self.metric)
 
     def __str__(self):
-        hidden_layer = f"_{self.hidden_layers}"
+        hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         cv = "cv, " if self.cv_hp else ""
-        return f"SAPLMA_meta_{self.embeddings_type}{hidden_layer} ({cv}{self.metric_name})"
+        return f"SAPLMA_meta_{self.embeddings_type}{hidden_layers} ({cv}{self.metric_name})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
        
