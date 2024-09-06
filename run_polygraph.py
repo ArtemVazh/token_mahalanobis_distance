@@ -37,10 +37,15 @@ from lm_polygraph.ue_metrics import *
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from token_knn import TokenKNN
 from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance, LinRegTokenMahalanobisDistance_Claim
-from average_token_mahalanobis_distance_hybrid import LinRegTokenMahalanobisDistance_Hybrid_Claim
+from average_token_mahalanobis_distance_hybrid import LinRegTokenMahalanobisDistance_Hybrid, LinRegTokenMahalanobisDistance_Hybrid_Claim
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
+from saplma import SAPLMA, SAPLMA_truefalse
+from saplma_meta import SAPLMA_meta
+from factoscope import LLMFactoscope, LLMFactoscopeAll
+from eigenscore import EigenScore
+from huq_msp_lrtmd import HUQ_LRTMD, HUQ_LRTMD_Claim
 
-from huq_msp_lrtmd import HUQ_LRTMD_Claim
+from alignscore import AlignScore as AlignScoreNew
 
 
 hydra_config = Path(os.environ["HYDRA_CONFIG"])
@@ -305,7 +310,19 @@ def get_density_based_ue_methods(args, model_type):
                 normalize = getattr(args, "normalize", False),
             )
         alignscorer = AlignScore(batch_size=1)
+        alignscorermean = AlignScoreNew(return_mean=True, batch_size=1)
         rougel = RougeMetric("rougeL")
+
+        layers = getattr(args, "layers", [0, -1])
+        metric_thrs = getattr(args, "metric_thrs", [0.3])            
+            
+        if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
+            metrics = [accuracy, alignscorer, alignscorermean]
+            metrics_names = ["Accuracy", "AlignScore", "AlignScoreMean"]
+        else:
+            alignscorerinv = AlignScoreNew(return_inverse=True, batch_size=1)
+            metrics = [rougel, alignscorer, alignscorermean, alignscorerinv]
+            metrics_names = ["Rouge-L", "AlignScore", "AlignScoreMean", "AlignScoreInv"]  
     
         if getattr(args, 'parameters_path', False):
             parameters_path = args.parameters_path
@@ -334,55 +351,76 @@ def get_density_based_ue_methods(args, model_type):
             ]
         else:
             estimators += [
-                MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
-                # RelativeMahalanobisDistanceSeq(
-                #     "decoder", parameters_path=parameters_path
-                # ),
-                # RDESeq("decoder", parameters_path=parameters_path),
-                # PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
-                # PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
+                PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
+                PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
             ]
 
-            layers = getattr(args, "layers", [0, -1])
-            metric_thrs = getattr(args, "metric_thrs", [0.5])
-            if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
-                metrics = [accuracy, alignscorer]
-                metrics_names = ["Accuracy", "AlignScore"]
-            else:
-                metrics = [rougel, alignscorer]
-                metrics_names = ["Rouge-L", "AlignScore"]
-            aggregations = ["mean"]#, "sum"]
-
-            for agg in aggregations:
+            if getattr(args, "use_truefalse_dataset", False):
                 for layer in layers:
                     estimators += [
-                            TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg),
-                            RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=None, metric_name="", aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=0, aggregation=agg),
-                        ]                    
-                    for m, m_name in zip(metrics, metrics_names):
-                        for k, thr in enumerate(metric_thrs):
-                            if (k > 0) and (m_name=="Accuracy"):
-                                continue
-                            estimators += [
-                                TokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),
-                                RelativeTokenMahalanobisDistance("decoder", parameters_path=parameters_path, metric=m, metric_name=m_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, aggregation=agg),    
-                            ]
+                            SAPLMA_truefalse("decoder", parameters_path=None, aggregated=False, hidden_layer=layer, device=getattr(args, "md_device", "cuda")),
+                        ]
 
-            for m, m_name in zip(metrics, metrics_names):
-                for ue in ["TokenMahalanobis", "RelativeTokenMahalanobis"]:
-                    for k, thr in enumerate(metric_thrs):
-                        estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                                      metric=m, metric_name=m_name, metric_md=m, metric_md_name=m_name, 
-                                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr, aggregation="mean",
-                                                                      ue=ue, positive=False, meta_model="LinReg", norm="norm")]
-                        estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                                      metric=m, metric_name=m_name, metric_md=m, metric_md_name=m_name, 
-                                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr, aggregation="mean",
-                                                                      ue=ue, positive=False, meta_model="LinReg", norm="unnorm")]
-                        estimators += [LinRegTokenMahalanobisDistance("decoder", parameters_path=parameters_path, 
-                                                                      metric=m, metric_name=m_name, metric_md=m, metric_md_name=m_name, 
-                                                                      aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr, aggregation="mean",
-                                                                          ue=ue, positive=False, meta_model="LinReg", norm="orig")]
+            #layer-wise methods
+            for layer in layers:
+                estimators += [
+                    MahalanobisDistanceSeq("decoder", parameters_path=None, hidden_layer=layer),
+                    RelativeMahalanobisDistanceSeq("decoder", parameters_path=None, hidden_layer=layer),
+                    RDESeq("decoder", parameters_path=None, hidden_layer=layer),
+                    
+                    EigenScore(hidden_layer=layer),
+                    EigenScore("sample_embeddings_last_token", hidden_layer=layer),
+
+                    TokenMahalanobisDistance("decoder", parameters_path=None, hidden_layer=layer),
+                    RelativeTokenMahalanobisDistance("decoder", parameters_path=None, hidden_layer=layer),
+                ]
+                for metric, metric_name in zip(metrics, metrics_names):
+                    estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
+                    for thr in metric_thrs:
+                        estimators += [TokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr),
+                                       RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr)]
+
+            #meta methods
+            for metric, metric_name in zip(metrics, metrics_names):
+                estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device=getattr(args, "md_device", "cuda"), cv_hp=True)]
+                for thr in metric_thrs:
+                    estimators += [LLMFactoscope(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=False),
+                                   LLMFactoscope(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True),
+
+                                   LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=False),
+                                   LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True),
+
+                                   LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                  metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                  aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                  ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3),
+                                   
+                                   LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                  metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                  aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                  ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3),
+
+                                   LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                         metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                         aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                         ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3),
+                                   
+                                   LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                         metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                         aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                         ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3),
+                                   
+                                   HUQ_LRTMD("decoder", parameters_path=None, 
+                                             metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name, 
+                                             aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                             ue="TokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3),
+
+                                   HUQ_LRTMD("decoder", parameters_path=None, 
+                                             metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name, 
+                                             aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                             ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3),
+                                  ]
+        
     return estimators
 
 
@@ -413,33 +451,33 @@ def get_ue_methods(args, model):
             MaximumSequenceProbability(),
             Perplexity(),
             MeanTokenEntropy(),
-            # # MeanPointwiseMutualInformation(),
-            # # MeanConditionalPointwiseMutualInformation(),
-            # # ClaimConditionedProbability(),
-            # # PTrue(),
-            # # PTrueSampling(),
-            # MonteCarloSequenceEntropy(),
-            # MonteCarloNormalizedSequenceEntropy(),
-            # # LexicalSimilarity(metric="rouge1"),
-            # # LexicalSimilarity(metric="rouge2"),
-            # LexicalSimilarity(metric="rougeL"),
-            # # LexicalSimilarity(metric="BLEU"),
-            # NumSemSets(),
-            # EigValLaplacian(similarity_score="NLI_score", affinity="entail"),
-            # # EigValLaplacian(similarity_score="NLI_score", affinity="contra"),
-            # # EigValLaplacian(similarity_score="Jaccard_score"),
-            # DegMat(similarity_score="NLI_score", affinity="entail"),
-            # # DegMat(similarity_score="NLI_score", affinity="contra"),
-            # # DegMat(similarity_score="Jaccard_score"),
-            # Eccentricity(similarity_score="NLI_score", affinity="entail"),
-            # # Eccentricity(similarity_score="NLI_score", affinity="contra"),
-            # # Eccentricity(similarity_score="Jaccard_score"),
-            #SemanticEntropy(),
-            #SAR(),
-            # # TokenSAR(),
-            # SentenceSAR(),
-            # # RenyiNeg(),
-            # # FisherRao(),
+            # MeanPointwiseMutualInformation(),
+            # MeanConditionalPointwiseMutualInformation(),
+            # ClaimConditionedProbability(),
+            # PTrue(),
+            # PTrueSampling(),
+            MonteCarloSequenceEntropy(),
+            MonteCarloNormalizedSequenceEntropy(),
+            # LexicalSimilarity(metric="rouge1"),
+            # LexicalSimilarity(metric="rouge2"),
+            LexicalSimilarity(metric="rougeL"),
+            # LexicalSimilarity(metric="BLEU"),
+            NumSemSets(),
+            EigValLaplacian(similarity_score="NLI_score", affinity="entail"),
+            # EigValLaplacian(similarity_score="NLI_score", affinity="contra"),
+            # EigValLaplacian(similarity_score="Jaccard_score"),
+            DegMat(similarity_score="NLI_score", affinity="entail"),
+            # DegMat(similarity_score="NLI_score", affinity="contra"),
+            # DegMat(similarity_score="Jaccard_score"),
+            Eccentricity(similarity_score="NLI_score", affinity="entail"),
+            # Eccentricity(similarity_score="NLI_score", affinity="contra"),
+            # Eccentricity(similarity_score="Jaccard_score"),
+            SemanticEntropy(),
+            SAR(),
+            # TokenSAR(),
+            SentenceSAR(),
+            # RenyiNeg(),
+            # FisherRao(),
         ]
 
     if args.use_ens_ue:
@@ -630,6 +668,8 @@ def get_generation_metrics(args):
                 normalize = getattr(args, "normalize", False),
             ),
             AlignScore(batch_size=1),
+            AlignScoreNew(return_mean=True, batch_size=1),
+            AlignScoreNew(return_inverse=True, batch_size=1)
         ]
         if args.task == "nmt":
             ignore_regex = getattr(args, "source_ignore_regex", None)
