@@ -40,7 +40,6 @@ from sklearn.decomposition import PCA
 from lm_polygraph.estimators.max_probability import MaximumSequenceProbability
 from lm_polygraph.estimators.claim.max_probability import MaximumClaimProbability
 from lm_polygraph.estimators.claim.claim_conditioned_probability import ClaimConditionedProbabilityClaim
-from tad import TAD, TADClaim
 
 prr = PredictionRejectionArea()
 
@@ -135,7 +134,7 @@ class HUQ_LRTMD(Estimator):
 
         use_tad: bool = False,
 
-        device: str = "cpu"
+        device: str = "cuda"
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
@@ -147,11 +146,11 @@ class HUQ_LRTMD(Estimator):
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += ["background_train_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
             else:
                 dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
         self.is_fitted = False
@@ -177,8 +176,6 @@ class HUQ_LRTMD(Estimator):
                                                  remove_corr=remove_corr, remove_alg=remove_alg, device=device)
         self.msp = MaximumSequenceProbability()
         self.use_tad=use_tad
-        self.tad = TAD(regression_model="LinReg", ignore_special_tokens=False, aggregation="sum(log(p_i))", clip_y=1, 
-                       use_alignscore=True, aggregated=aggregated, cross_val=True, parameters_path=parameters_path)
     
     def __str__(self):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])

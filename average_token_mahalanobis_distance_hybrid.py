@@ -43,7 +43,6 @@ from lm_polygraph.estimators.claim.claim_conditioned_probability import ClaimCon
 import scipy
 import scipy.cluster.hierarchy as sch
 from sklearn.decomposition import PCA
-from tad import TAD, TADClaim
 
 prr = PredictionRejectionArea()
 
@@ -219,7 +218,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
 
         use_tad: bool = False,
 
-        device: str = "cpu"
+        device: str = "cuda"
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
@@ -232,11 +231,11 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += ["background_train_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
             else:
                 dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistance(
                     embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device 
@@ -267,10 +266,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
         self.msp = MaximumSequenceProbability()
         self.ent = EntropyCalculator()
         self.use_tad=use_tad
-        self.tad = TAD(regression_model="LinReg", ignore_special_tokens=False, aggregation="sum(log(p_i))", clip_y=1, 
-                       use_alignscore=True, aggregated=aggregated, cross_val=True, parameters_path=parameters_path)
 
-    
     def __str__(self):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         positive = "pos" if self.positive else ""
@@ -387,8 +383,8 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                     mean_md.append(np.mean(dists_i))
                 train_mds.append(mean_md)
             train_dists = np.array(train_mds).T
-            np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
-            np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
+            # np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
+            # np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
@@ -761,8 +757,8 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
                         tmd_scores[-1].append(claim_p_i.sum(axis=0))
 
             train_dists = np.concatenate(tmd_scores)
-            np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
-            np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
+            # np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
+            # np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)

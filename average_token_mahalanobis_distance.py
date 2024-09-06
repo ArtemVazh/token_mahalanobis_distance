@@ -209,7 +209,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
         remove_corr: bool = False,
         remove_alg: int = 2,   
 
-        device: str = "cpu"
+        device: str = "cuda"
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
@@ -220,11 +220,11 @@ class LinRegTokenMahalanobisDistance(Estimator):
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += ["background_train_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
             else:
                 dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistance(
                     embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device 
@@ -363,8 +363,8 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     mean_md.append(np.mean(dists_i))
                 train_mds.append(mean_md)
             train_dists = np.array(train_mds).T
-            np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
-            np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
+            # np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
+            # np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
@@ -686,8 +686,8 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                         tmd_scores[-1].append(claim_p_i.sum(axis=0))
 
             train_dists = np.concatenate(tmd_scores)
-            np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
-            np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
+            # np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
+            # np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)

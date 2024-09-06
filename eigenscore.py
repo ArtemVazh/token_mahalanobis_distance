@@ -9,16 +9,24 @@ from lm_polygraph.estimators.estimator import Estimator
 class EigenScore(Estimator):
     def __init__(
         self,
-        alpha:float = 1e-3
+        embeddings: str = "sample_embeddings",
+        alpha:float = 1e-3,
+        hidden_layer: int = -1,
     ):
-        super().__init__(["sample_embeddings"], "sequence")
+        self.hidden_layer = hidden_layer
+        if self.hidden_layer == -1:
+            self.hidden_layer_name = ""
+        else:
+            self.hidden_layer_name = f"_{self.hidden_layer}"
+        super().__init__([f"{embeddings}{self.hidden_layer_name}"], "sequence")
+        self.embeddings = embeddings
         self.alpha = alpha
 
     def __str__(self):
-        return f"EigenScore"
+        return f"EigenScore {self.embeddings}{self.hidden_layer_name}"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
-        sample_embeddings = stats[f"sample_embeddings"]
+        sample_embeddings = stats[f"{self.embeddings}{self.hidden_layer_name}"]
         ue = []
         for embeddings in sample_embeddings:
             sentence_embeddings = np.array(embeddings)
