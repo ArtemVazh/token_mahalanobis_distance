@@ -70,7 +70,7 @@ class MLP:
             y_torch = y_torch.clone().detach().float()
         batch_start = torch.arange(0, len(X), self.batch_size)
         self.model.to(self.device)
-        for epoch in tqdm(range(self.n_epochs)):
+        for epoch in range(self.n_epochs):
             self.model.train()
             for start in batch_start:
                 X_batch = X_torch[start:start+self.batch_size].to(self.device)
@@ -139,7 +139,6 @@ def cross_val_hp(X, y, model_init, params, regression=False):
             if best_score < scores_mean:
                 best_score = scores_mean
                 best_params = param
-        print(param, "SCORE:", scores_mean)
     print("BEST:", best_params, "BEST SCORE:", scores_mean)
     if best_params is None:
        best_params = list(itertools.product(*params.values()))[0]
