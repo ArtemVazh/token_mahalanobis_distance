@@ -30,7 +30,8 @@ class TokenMahalanobisDistance(Estimator):
         metric = None,
         metric_name: str = "",
         aggregated: bool = False,
-        device: str = "cuda"
+        device: str = "cuda",
+        storage_device: str = "cuda",
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -49,6 +50,7 @@ class TokenMahalanobisDistance(Estimator):
         self.aggregation = aggregation
         self.metric_name = metric_name
         self.device = device
+        self.storage_device = storage_device
         self.aggregated = aggregated
         if metric is not None:
             self.metric = metric
@@ -115,6 +117,9 @@ class TokenMahalanobisDistance(Estimator):
                         train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
 
                 self.centroid = train_embeddings.mean(axis=0)
+                
+                if self.storage_device == "cpu":
+                    self.centroid = self.centroid.cpu()
                 if self.parameters_path is not None:
                     torch.save(self.centroid, f"{self.full_path}/centroid.pt")
                 if save_data:
@@ -136,6 +141,9 @@ class TokenMahalanobisDistance(Estimator):
                 self.sigma_inv, _ = compute_inv_covariance(
                     self.centroid.unsqueeze(0), train_embeddings
                 )
+                if self.storage_device == "cpu":
+                    self.sigma_inv = self.sigma_inv.cpu()
+                    
                 if self.parameters_path is not None:
                     torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
                 
@@ -143,23 +151,32 @@ class TokenMahalanobisDistance(Estimator):
                     stats[covariance_key] = self.sigma_inv
             self.is_fitted = True
 
-        if torch.cuda.is_available():
-            if not self.centroid.is_cuda:
-                self.centroid = self.centroid.cuda()
-            if not self.sigma_inv.is_cuda:
-                self.sigma_inv = self.sigma_inv.cuda()
-
         # compute MD given centroids and inverse covariance matrix
-        dists = mahalanobis_distance_with_known_centroids_sigma_inv(
-            self.centroid.float(),
-            None,
-            self.sigma_inv.float(),
-            embeddings.float(),
-        )[:, 0]
-
-        if self.device == "cpu":
-            self.centroid = self.centroid.cpu()
-            self.sigma_inv = self.sigma_inv.cpu()
+        if self.device == "cuda" and self.storage_device == "cpu":
+            if embeddings.shape[0] < 20:
+                # force compute on cpu, since for a small number of embeddings it will be faster than move to cuda 
+                dists = mahalanobis_distance_with_known_centroids_sigma_inv(
+                    self.centroid.float(),
+                    None,
+                    self.sigma_inv.float(),
+                    embeddings.cpu().float(),
+                )[:, 0]
+            else:
+                dists = mahalanobis_distance_with_known_centroids_sigma_inv(
+                    self.centroid.cuda().float(),
+                    None,
+                    self.sigma_inv.cuda().float(),
+                    embeddings.float(),
+                )[:, 0]
+        elif self.device == "cuda" and self.storage_device == "cuda":
+            dists = mahalanobis_distance_with_known_centroids_sigma_inv(
+                self.centroid.float(),
+                None,
+                self.sigma_inv.float(),
+                embeddings.float(),
+            )[:, 0]
+        else:
+            raise NotImplementedError
         
         k = 0
         agg_dists = []
@@ -200,7 +217,8 @@ class TokenMahalanobisDistanceClaim(Estimator):
         metric_thr: float = 0.0,
         aggregation: str = "mean",
         hidden_layer: int = -1,
-        device: str = "cuda"
+        device: str = "cuda",
+        storage_device: str = "cuda",
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -218,6 +236,7 @@ class TokenMahalanobisDistanceClaim(Estimator):
         self.metric_thr = metric_thr
         self.aggregation = aggregation
         self.device = device
+        self.storage_device = storage_device
         self.factcheck = OpenAIFactCheck(openai_model="gpt-4o")
         
         # if self.parameters_path is not None:
@@ -298,6 +317,8 @@ class TokenMahalanobisDistanceClaim(Estimator):
                         train_embeddings = train_embeddings[self.train_token_metrics <= self.metric_thr]
     
                 self.centroid = train_embeddings.mean(axis=0)
+                if self.storage_device == "cpu":
+                    self.centroid = self.centroid.cpu()
                 if self.parameters_path is not None:
                     torch.save(self.centroid, f"{self.full_path}/centroid.pt")
                 if save_data:
@@ -319,6 +340,8 @@ class TokenMahalanobisDistanceClaim(Estimator):
                 self.sigma_inv, _ = compute_inv_covariance(
                     self.centroid.unsqueeze(0), train_embeddings
                 )
+                if self.storage_device == "cpu":
+                    self.sigma_inv = self.sigma_inv.cpu()
                 if self.parameters_path is not None:
                     torch.save(self.sigma_inv, f"{self.full_path}/sigma_inv.pt")
                     
@@ -326,24 +349,34 @@ class TokenMahalanobisDistanceClaim(Estimator):
                     stats[covariance_key] = self.sigma_inv
             self.is_fitted = True
 
-        if torch.cuda.is_available():
-            if not self.centroid.is_cuda:
-                self.centroid = self.centroid.cuda()
-            if not self.sigma_inv.is_cuda:
-                self.sigma_inv = self.sigma_inv.cuda()
 
         # compute MD given centroids and inverse covariance matrix
-        dists = mahalanobis_distance_with_known_centroids_sigma_inv(
-            self.centroid.float(),
-            None,
-            self.sigma_inv.float(),
-            embeddings.float(),
-        )[:, 0]
+        if self.device == "cuda" and self.storage_device == "cpu":
+            if embeddings.shape[0] < 20:
+                # force compute on cpu, since for a small number of embeddings it will be faster than move to cuda 
+                dists = mahalanobis_distance_with_known_centroids_sigma_inv(
+                    self.centroid.float(),
+                    None,
+                    self.sigma_inv.float(),
+                    embeddings.cpu().float(),
+                )[:, 0]
+            else:
+                dists = mahalanobis_distance_with_known_centroids_sigma_inv(
+                    self.centroid.cuda().float(),
+                    None,
+                    self.sigma_inv.cuda().float(),
+                    embeddings.float(),
+                )[:, 0]
+        elif self.device == "cuda" and self.storage_device == "cuda":
+            dists = mahalanobis_distance_with_known_centroids_sigma_inv(
+                self.centroid.float(),
+                None,
+                self.sigma_inv.float(),
+                embeddings.float(),
+            )[:, 0]
+        else:
+            raise NotImplementedError
 
-        if self.device == "cpu":
-            self.centroid = self.centroid.cpu()
-            self.sigma_inv = self.sigma_inv.cpu()
-        
         k = 0
         tmd_scores = []
         claims = stats["claims"]

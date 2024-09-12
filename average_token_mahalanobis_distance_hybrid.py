@@ -218,11 +218,13 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
 
         use_tad: bool = False,
 
-        device: str = "cuda"
+        device: str = "cuda",
+        storage_device: str = "cuda",
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
         self.device = device
+        self.storage_device = storage_device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts"]
         dependencies += ["attention_features", "train_attention_features", "train_greedy_log_likelihoods"]
@@ -238,11 +240,11 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                     dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device 
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device 
                 )
             elif ue == "RelativeTokenMahalanobis":
                 self.tmds[layer] = RelativeTokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device
                 )
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
@@ -552,9 +554,15 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
 
         use_ccp: bool = False,
         ccp_context: str = "no_context",
+        
+        device: str = "cuda",
+        storage_device: str = "cuda",
+        
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
+        self.device = device
+        self.storage_device = storage_device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts",  "claims", "train_claims"]
         self.use_ccp = use_ccp
@@ -573,11 +581,11 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
                     dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistanceClaim(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer, device=self.device, storage_device=self.storage_device
                 )
             elif ue == "RelativeTokenMahalanobis":
                 self.tmds[layer] = RelativeTokenMahalanobisDistanceClaim(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer, device=self.device, storage_device=self.storage_device
                 )
                 
         super().__init__(dependencies, "claim")

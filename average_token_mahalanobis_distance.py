@@ -124,65 +124,7 @@ class MLP:
             prediction.append(y_pred.cpu().detach().flatten())
         prediction = np.concatenate(prediction)
         return prediction
-
-class AverageTokenMahalanobisDistance(Estimator):
-    def __init__(
-        self,
-        embeddings_type: str = "decoder",
-        parameters_path: str = None,
-        normalize: bool = False,
-        metric_thr: float = 0.0,
-        aggregation: str = "mean",
-        hidden_layers: List[int] = [0, -1],
-        metric = None,
-        metric_name: str = "",
-        aggregated: bool = False,
-    ):
-        self.hidden_layers = hidden_layers
-        self.tmds = []
-        dependencies = ["train_greedy_tokens", "train_target_texts"]
-        for layer in self.hidden_layers:
-            if layer == -1:
-                dependencies += ["token_embeddings", "train_token_embeddings"]
-            else:
-                dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
-
-            self.tmds.append(TokenMahalanobisDistance(
-                embeddings_type, parameters_path, normalize=False, metric_thr=metric_thr, metric=metric, metric_name=metric_name, aggregation="none", hidden_layer=layer, aggregated=aggregated
-            ))
-        
-        super().__init__(dependencies, "sequence")
-        self.is_fitted = False
-        self.metric_thr = metric_thr
-        self.aggregation = aggregation
-        self.metric_name = metric_name
-        self.embeddings_type=embeddings_type
     
-    def __str__(self):
-        hidden_layers = ",".join([str(x) for x in self.hidden_layers])
-        return f"AverageTokenMahalanobisDistance_{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
-
-    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
-        # take the embeddings
-        mds = []
-        for MD in self.tmds:
-            md = MD(stats)
-            mds.append(md)
-        dists = np.mean(mds, axis=0)
-        
-        k = 0
-        agg_dists = []
-        for tokens in stats["greedy_tokens"]:
-            dists_i = dists[k:k+len(tokens)]
-            k += len(tokens)
-            if self.aggregation == "mean":
-                agg_dists.append(np.mean(dists_i))
-            elif self.aggregation == "sum":
-                agg_dists.append(np.sum(dists_i))
-
-        return agg_dists
-
-
 class LinRegTokenMahalanobisDistance(Estimator):
     def __init__(
         self,
@@ -209,11 +151,13 @@ class LinRegTokenMahalanobisDistance(Estimator):
         remove_corr: bool = False,
         remove_alg: int = 2,   
 
-        device: str = "cuda"
+        device: str = "cuda",
+        storage_device: str = "cuda",
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
         self.device = device
+        self.storage_device = storage_device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts"]
         for layer in self.hidden_layers:
@@ -227,11 +171,11 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device 
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device 
                 )
             elif ue == "RelativeTokenMahalanobis":
                 self.tmds[layer] = RelativeTokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device
                 )
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
@@ -495,10 +439,15 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
 
         tgt_norm: bool = False,
         remove_corr: bool = False,
-        remove_alg: int = 2,        
+        remove_alg: int = 2,  
+        
+        device: str = "cuda",
+        storage_device: str = "cuda",      
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
+        self.device = device
+        self.storage_device = storage_device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts",  "claims", "train_claims"]
         for layer in self.hidden_layers:
@@ -512,11 +461,11 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                     dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistanceClaim(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer, device=self.device, storage_device=self.storage_device
                 )
             elif ue == "RelativeTokenMahalanobis":
                 self.tmds[layer] = RelativeTokenMahalanobisDistanceClaim(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer, device=self.device, storage_device=self.storage_device
                 )
                 
         super().__init__(dependencies, "claim")

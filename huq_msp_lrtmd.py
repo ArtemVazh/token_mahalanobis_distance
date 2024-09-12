@@ -134,11 +134,13 @@ class HUQ_LRTMD(Estimator):
 
         use_tad: bool = False,
 
-        device: str = "cuda"
+        device: str = "cuda",
+        storage_device: str = "cuda",
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
         self.device = device
+        self.storage_device = storage_device
         self.tmds = {}
         dependencies = ["train_greedy_tokens", "train_target_texts"]
         dependencies += ["attention_features", "train_attention_features", "train_greedy_log_likelihoods"]
@@ -173,7 +175,7 @@ class HUQ_LRTMD(Estimator):
                                                  metric_md=metric, metric_md_name=metric_name, aggregated=aggregated, 
                                                  hidden_layers=hidden_layers, metric_thr=metric_thr, aggregation=aggregation,
                                                  ue=ue, positive=positive, meta_model=meta_model, norm=norm, 
-                                                 remove_corr=remove_corr, remove_alg=remove_alg, device=device)
+                                                 remove_corr=remove_corr, remove_alg=remove_alg, device=device, storage_device=storage_device)
         self.msp = MaximumSequenceProbability()
         self.use_tad=use_tad
     
@@ -264,6 +266,9 @@ class HUQ_LRTMD_Claim(Estimator):
 
         use_ccp: bool = False,
         ccp_context: str = "no_context",
+        
+        device: str = "cuda",
+        storage_device: str = "cuda",
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
@@ -308,7 +313,7 @@ class HUQ_LRTMD_Claim(Estimator):
                                                  metric_md=metric, metric_md_name=metric_name, aggregated=aggregated, 
                                                  hidden_layers=hidden_layers, metric_thr=metric_thr, aggregation=aggregation,
                                                  ue=ue, positive=positive, meta_model=meta_model, norm=norm, 
-                                                 remove_corr=remove_corr, remove_alg=remove_alg)
+                                                 remove_corr=remove_corr, remove_alg=remove_alg, device=device, storage_device=storage_device)
         self.msp = MaximumClaimProbability()
         if self.use_ccp:
             self.ccp_context = ccp_context
