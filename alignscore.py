@@ -75,5 +75,5 @@ class AlignScore(GenerationMetric):
         if self.return_mean:
             return (scores + scores_) / 2
         if self.return_inverse:
-            return (scores + scores_) / 2
+            return scores_
         return score
