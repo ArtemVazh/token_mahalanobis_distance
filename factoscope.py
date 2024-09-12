@@ -268,7 +268,7 @@ def test_model(model, test_loader, support_loader, act_dim, squeeze_dim=1):
     # print(f"Accuracy: {accuracy}")
     return accuracy, y_pred
 
-def predict_model(model, test_loader, support_loader, act_dim, squeeze_dim=1, support_set_output=None, support_set_labels=None, return_dist=False):
+def predict_model(model, test_loader, support_loader, act_dim, squeeze_dim=1, support_set_output=None, support_set_labels=None, return_new_dist=False, return_dist=False):
     model.eval()
     y_pred = []
 
@@ -296,8 +296,12 @@ def predict_model(model, test_loader, support_loader, act_dim, squeeze_dim=1, su
             dist = F.pairwise_distance(anchor_embedding, support_set_output, p=2)
             if return_dist:
                 correct_dist = dist[support_set_labels == 1]
+                incorrect_dist = dist[support_set_labels == 0]
                 if len(correct_dist):
-                    y_pred.append(correct_dist.min().item())
+                    if return_new_dist:
+                        y_pred.append(correct_dist.min().item() / incorrect_dist.min().item())
+                    else:
+                        y_pred.append(correct_dist.min().item())
                 else:
                     y_pred.append(1 - dist.min().item())
             else:
@@ -359,6 +363,7 @@ class LLMFactoscope(Estimator):
         emb_dim: int = 24,
         topk: int = 10,
         return_dist: bool = False,
+        return_new_dist: bool = False
     ):
         self.hidden_layers = hidden_layers
         dependencies = ["train_greedy_tokens", "train_target_texts", "final_output_ranks", "topk_layer_distance", "topk_prob",
@@ -381,9 +386,11 @@ class LLMFactoscope(Estimator):
         self.emb_dim = emb_dim
         self.topk = topk
         self.return_dist = return_dist
+        self.return_new_dist = return_new_dist
 
     def __str__(self):
         dist = "_dist" if self.return_dist else ""
+        dist = dist+"_new" if self.return_new_dist else dist
         return f"Factoscope{dist}_{self.metric_name}"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
@@ -540,7 +547,7 @@ class LLMFactoscope(Estimator):
         y_pred, self.support_set_labels, self.support_set_output = predict_model(self.ue_predictor, loader, self.support_loader, 
                                                                                  embeddings_processed.shape[-1],
                                                                                  support_set_labels=self.support_set_labels, support_set_output=self.support_set_output,
-                                                                                 squeeze_dim=1, return_dist=self.return_dist)
+                                                                                 squeeze_dim=1,  return_new_dist=self.return_new_dist, return_dist=self.return_dist)
         if self.return_dist:
             return np.array(y_pred)
         return 1 - np.array(y_pred)
@@ -558,6 +565,7 @@ class LLMFactoscopeAll(Estimator):
         topk: int = 10,
         max_train_size: int = 5000,
         return_dist: bool = False,
+        return_new_dist: bool = False
     ):
         self.hidden_layers = hidden_layers
         dependencies = ["train_greedy_tokens", "train_target_texts", "final_output_ranks_all", "topk_layer_distance_all", "topk_prob_all",
@@ -581,9 +589,11 @@ class LLMFactoscopeAll(Estimator):
         self.topk = topk
         self.return_dist = return_dist
         self.max_train_size = max_train_size
+        self.return_new_dist = return_new_dist
 
     def __str__(self):
         dist = "_dist" if self.return_dist else ""
+        dist = dist+"_new" if self.return_new_dist else dist
         return f"FactoscopeAll{dist}_{self.metric_name}"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
@@ -743,7 +753,7 @@ class LLMFactoscopeAll(Estimator):
         y_pred, self.support_set_labels, self.support_set_output = predict_model(self.ue_predictor, loader, self.support_loader, 
                                                                                  embeddings_processed.shape[-1],
                                                                                  support_set_labels=self.support_set_labels, support_set_output=self.support_set_output,
-                                                                                 squeeze_dim=1, return_dist=self.return_dist)
+                                                                                 squeeze_dim=1, return_new_dist=self.return_new_dist, return_dist=self.return_dist)
         
         k = 0
         agg_preds = []
