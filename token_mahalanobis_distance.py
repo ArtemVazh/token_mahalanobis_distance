@@ -88,6 +88,10 @@ class TokenMahalanobisDistance(Estimator):
             centroid_key = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
             if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.centroid = stats[centroid_key]
+                if self.storage_device == "cpu":
+                    self.centroid = self.centroid.cpu()
+                elif self.storage_device == "cuda":
+                    self.centroid = self.centroid.cuda()
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
                     stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
@@ -130,6 +134,10 @@ class TokenMahalanobisDistance(Estimator):
             covariance_key = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
             if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.sigma_inv = stats[covariance_key]
+                if self.storage_device == "cpu":
+                    self.sigma_inv = self.sigma_inv.cpu()
+                elif self.storage_device == "cuda":
+                    self.sigma_inv = self.sigma_inv.cuda()
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
                     stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]

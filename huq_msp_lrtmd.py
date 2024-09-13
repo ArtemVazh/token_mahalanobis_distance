@@ -32,6 +32,7 @@ import torch.optim as optim
 
 from lm_polygraph.ue_metrics.ue_metric import get_random_scores
 from lm_polygraph.ue_metrics.pred_rej_area import PredictionRejectionArea
+from sklearn.model_selection import train_test_split
 
 import scipy
 import scipy.cluster.hierarchy as sch
@@ -192,35 +193,38 @@ class HUQ_LRTMD(Estimator):
             train_greedy_texts = stats[f"train_greedy_texts"]
             train_greedy_tokens = stats[f"train_greedy_tokens"]
            
-            dev_size = 0.5
-            dev_samples = int(len(train_greedy_texts) * dev_size)
-            len_tokens = [len(tokens) for tokens in train_greedy_tokens]
-            dev_tokens = np.sum(len_tokens[:dev_samples])
+            dev_size = 0.5 
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
+            tokens_before = np.cumsum(lens)
+            token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
+            token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
             
             md_eval = self.md(stats)
             self.train_md = self.md.y_preds
             if self.use_tad:
-                tad_stats = {
-                    "tokenizer": stats["tokenizer"],
-                    "greedy_texts": stats["train_greedy_texts"][dev_samples:],
-                    "greedy_tokens": stats["train_greedy_tokens"][dev_samples:],
-                    "greedy_log_probs": stats["train_greedy_log_probs"][dev_samples:],
-                    "greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][dev_samples:],
-                    "attention_features": stats["train_attention_features"][dev_tokens-dev_samples:],
-                    "train_input_texts": stats["train_input_texts"][:dev_samples],
-                    "train_target_texts": stats["train_target_texts"][:dev_samples],
-                    "train_greedy_texts": stats["train_greedy_texts"][:dev_samples],
-                    "train_greedy_tokens": stats["train_greedy_tokens"][:dev_samples],
-                    "train_greedy_log_probs": stats["train_greedy_log_probs"][:dev_samples],
-                    "train_greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][:dev_samples],
-                    "train_attention_features": stats["train_attention_features"][:dev_tokens-dev_samples],
-                }
-                self.train_msp = np.array(self.tad(tad_stats))
-                self.tad.is_fitted = False
+                pass
+                # tad_stats = {
+                #     "tokenizer": stats["tokenizer"],
+                #     "greedy_texts": stats["train_greedy_texts"][dev_samples:],
+                #     "greedy_tokens": stats["train_greedy_tokens"][dev_samples:],
+                #     "greedy_log_probs": stats["train_greedy_log_probs"][dev_samples:],
+                #     "greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][dev_samples:],
+                #     "attention_features": stats["train_attention_features"][dev_tokens-dev_samples:],
+                #     "train_input_texts": stats["train_input_texts"][:dev_samples],
+                #     "train_target_texts": stats["train_target_texts"][:dev_samples],
+                #     "train_greedy_texts": stats["train_greedy_texts"][:dev_samples],
+                #     "train_greedy_tokens": stats["train_greedy_tokens"][:dev_samples],
+                #     "train_greedy_log_probs": stats["train_greedy_log_probs"][:dev_samples],
+                #     "train_greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][:dev_samples],
+                #     "train_attention_features": stats["train_attention_features"][:dev_tokens-dev_samples],
+                # }
+                # self.train_msp = np.array(self.tad(tad_stats))
+                # self.tad.is_fitted = False
             else:
-                self.train_msp = np.array(self.msp({"greedy_log_likelihoods": stats[f"train_greedy_log_likelihoods"][dev_samples:]}))
+                self.train_msp = np.array(self.msp({"greedy_log_likelihoods": [stats[f"train_greedy_log_likelihoods"][i] for i in dev_idx]}))
 
-            metrics = self.md.train_seq_metrics[dev_samples:]
+            metrics = self.md.train_seq_metrics[dev_idx]
             best_prr, self.t_min_best, self.t_max_best, self.alpha_best = grid_search_hp(self.train_md, self.train_msp, metrics, target_metric=prr)
             print("HUQ PARAMS", self.t_min_best, self.t_max_best, self.alpha_best)
             self.is_fitted = True            
@@ -338,10 +342,12 @@ class HUQ_LRTMD_Claim(Estimator):
             train_claims = stats[f"train_claims"]
             
             train_mds = []
-            dev_size = 0.5
-            dev_samples = int(len(train_greedy_texts) * dev_size)
-            len_tokens = [len(tokens) for tokens in train_greedy_tokens]
-            dev_tokens = np.sum(len_tokens[:dev_samples])
+            dev_size = 0.5 
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
+            tokens_before = np.cumsum(lens)
+            token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
+            token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
                 
             md_eval = self.md(stats)
             tmd_scores = self.md.y_preds
@@ -351,28 +357,28 @@ class HUQ_LRTMD_Claim(Estimator):
                     train_greedy_tokens_alternatives = stats[f"train_greedy_tokens_alternatives"]
                     train_greedy_tokens_alternatives_fact_pref_nli = stats[f"train_greedy_tokens_alternatives_fact_pref_nli"]
     
-                    train_stats = {"greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   "greedy_tokens_alternatives": train_greedy_tokens_alternatives[dev_samples:],
-                                   "greedy_tokens_alternatives_fact_pref_nli": train_greedy_tokens_alternatives_fact_pref_nli[dev_samples:],
-                                   "claims": train_claims[dev_samples:],}
+                    train_stats = {"greedy_tokens": [train_greedy_tokens[i] for i in dev_idx], 
+                                   "greedy_tokens_alternatives": [train_greedy_tokens_alternatives[i] for i in dev_idx],
+                                   "greedy_tokens_alternatives_fact_pref_nli": [train_greedy_tokens_alternatives_fact_pref_nli[i] for i in dev_idx],
+                                   "claims": [train_claims[i] for i in dev_idx],}
 
                 else:
                     train_greedy_tokens_alternatives = stats[f"train_greedy_tokens_alternatives"]
                     train_greedy_tokens_alternatives_nli = stats[f"train_greedy_tokens_alternatives_nli"]
     
-                    train_stats = {"greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   "greedy_tokens_alternatives": train_greedy_tokens_alternatives[dev_samples:],
-                                   "greedy_tokens_alternatives_nli": train_greedy_tokens_alternatives_nli[dev_samples:],
-                                   "claims": train_claims[dev_samples:],}
+                    train_stats = {"greedy_tokens": [train_greedy_tokens[i] for i in dev_idx], 
+                                   "greedy_tokens_alternatives": [train_greedy_tokens_alternatives[i] for i in dev_idx],
+                                   "greedy_tokens_alternatives_nli": [train_greedy_tokens_alternatives_nli[i] for i in dev_idx],
+                                   "claims": [train_claims[i] for i in dev_idx],}
                     
                 self.aleatoric = np.concatenate(self.ccp(train_stats))
             else:
-                self.aleatoric = np.concatenate(self.msp({"greedy_log_likelihoods": stats[f"train_greedy_log_likelihoods"][dev_samples:],
-                                                          "claims": train_claims[dev_samples:]}))
+                self.aleatoric = np.concatenate(self.msp({"greedy_log_likelihoods": [stats[f"train_greedy_log_likelihoods"][i] for i in dev_idx],
+                                                          "claims": [train_claims[i] for i in dev_idx]}))
             self.train_md = tmd_scores
 
             
-            metrics = np.concatenate(self.md.factcheck_score[dev_samples:])
+            metrics = np.concatenate([self.md.factcheck_score[i] for i in dev_idx])
 
             best_prr, self.t_min_best, self.t_max_best, self.alpha_best = grid_search_hp(self.train_md, self.aleatoric, metrics, target_metric=ROCAUC())
             print("HUQ PARAMS", self.t_min_best, self.t_max_best, self.alpha_best)

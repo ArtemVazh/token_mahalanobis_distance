@@ -29,6 +29,7 @@ from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance
 from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.ensemble import RandomForestRegressor
 from scipy.stats import rankdata
+from sklearn.model_selection import train_test_split
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
@@ -304,51 +305,53 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                 stats[metric_key] = self.train_seq_metrics
 
             train_mds = []
-            dev_size = 0.5
-            dev_samples = int(len(train_greedy_texts) * dev_size)
-            len_tokens = [len(tokens) for tokens in train_greedy_tokens]
-            dev_tokens = np.sum(len_tokens[:dev_samples])
+            dev_size = 0.5 
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
+            tokens_before = np.cumsum(lens)
+            token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
+            token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
                 
             for layer in self.hidden_layers:
                 if layer == -1:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
-                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
-                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
-                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   "train_target_texts": train_target_texts[:dev_samples],
-                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[:dev_tokens],
-                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[dev_tokens:],
+                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   "train_greedy_texts":[train_greedy_texts[k] for k in train_idx],
+                                   "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   "train_target_texts": [train_target_texts[k] for k in train_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][:dev_tokens]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][dev_tokens:]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_train_idx]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_dev_idx]
                 else:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
-                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
-                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
-                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   "train_target_texts": train_target_texts[:dev_samples],
-                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[:dev_tokens],
-                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[dev_tokens:],
+                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
+                                   "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   "train_target_texts": [train_target_texts[k] for k in train_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_train_idx]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_dev_idx]
                     
                 metric_key = f"train_{self.metric_md_name}_{len(train_greedy_texts)}"
                 if metric_key in stats.keys():
-                    train_stats[f"train_{self.metric_md_name}_{len(train_greedy_texts[:dev_samples])}"] = stats[metric_key][:dev_tokens]
+                    train_stats[f"train_{self.metric_md_name}_{len(train_idx)}"] = stats[metric_key][token_train_idx]
 
                 if layer == -1:
                     hidden_layer = ""
                 else:
                     hidden_layer = f"_{layer}"
-            
-                centroid_key_ = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
-                covariance_key_ = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                    
+                centroid_key_ = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
+                covariance_key_ = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
 
-                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
-                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
+                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
 
                 if centroid_key_ in stats.keys():
                     train_stats[centroid_key_] = stats[centroid_key_]
@@ -379,14 +382,12 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                 self.tmds[layer].is_fitted = False
                 k = 0
                 mean_md = []
-                for tokens in train_greedy_tokens[dev_samples:]:
+                for tokens in [train_greedy_tokens[k] for k in dev_idx]:
                     dists_i = md[k:k+len(tokens)]
                     k += len(tokens)
                     mean_md.append(np.mean(dists_i))
                 train_mds.append(mean_md)
             train_dists = np.array(train_mds).T
-            # np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
-            # np.save(f'{self.parameters_path}/train_seq_metrics_{str(self)}.npy', self.train_seq_metrics)
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
@@ -395,7 +396,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
             elif self.meta_model == "weights":
                 scores = []
                 for i in range(train_dists.shape[-1]):
-                    scores.append(get_prr(train_dists[:, i], self.train_seq_metrics[dev_samples:]))
+                    scores.append(get_prr(train_dists[:, i], self.train_seq_metrics[dev_idx]))
                 self.weights = np.array(scores)
                 self.weights /= np.abs(self.weights).sum()
                 
@@ -437,7 +438,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                         cls_prr = []
                         for f in np.argwhere(clusters == cluster).flatten():
                             cls_features.append(f)
-                            cls_prr.append(np.abs(get_prr(train_dists[:, f], self.train_seq_metrics[dev_samples:])))
+                            cls_prr.append(np.abs(get_prr(train_dists[:, f], self.train_seq_metrics[dev_idx])))
                         features.append(cls_features[np.argmax(cls_prr)]) 
                     self.added = np.zeros_like(feats, dtype=bool)
                     self.added[features] = True
@@ -455,31 +456,32 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                     self.pca = PCA(n_components=n_components)
                     X = self.pca.fit_transform(X)
 
-            msp = np.array(self.msp({"greedy_log_likelihoods": train_greedy_log_likelihoods[dev_samples:]}))
-            ent = np.array([np.mean(x) for x in self.ent({"greedy_log_probs": train_greedy_log_probs[dev_samples:]})["entropy"]])
+            msp = np.array(self.msp({"greedy_log_likelihoods": [train_greedy_log_likelihoods[i] for i in dev_idx]}))
+            ent = np.array([np.mean(x) for x in self.ent({"greedy_log_probs": [train_greedy_log_probs[i] for i in dev_idx]})["entropy"]])
             if self.use_tad:
-                tad_stats = {
-                    "tokenizer": stats["tokenizer"],
-                    "greedy_texts": stats["train_greedy_texts"][dev_samples:],
-                    "greedy_tokens": stats["train_greedy_tokens"][dev_samples:],
-                    "greedy_log_probs": stats["train_greedy_log_probs"][dev_samples:],
-                    "greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][dev_samples:],
-                    "attention_features": stats["train_attention_features"][dev_tokens-dev_samples:],
-                    "train_input_texts": stats["train_input_texts"][:dev_samples],
-                    "train_target_texts": stats["train_target_texts"][:dev_samples],
-                    "train_greedy_texts": stats["train_greedy_texts"][:dev_samples],
-                    "train_greedy_tokens": stats["train_greedy_tokens"][:dev_samples],
-                    "train_greedy_log_probs": stats["train_greedy_log_probs"][:dev_samples],
-                    "train_greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][:dev_samples],
-                    "train_attention_features": stats["train_attention_features"][:dev_tokens-dev_samples],
-                }
-                tad = np.array(self.tad(tad_stats))
-                self.tad.is_fitted = False
-                X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1), tad.reshape(-1, 1)])
+                pass
+                # tad_stats = {
+                #     "tokenizer": stats["tokenizer"],
+                #     "greedy_texts": stats["train_greedy_texts"][dev_samples:],
+                #     "greedy_tokens": stats["train_greedy_tokens"][dev_samples:],
+                #     "greedy_log_probs": stats["train_greedy_log_probs"][dev_samples:],
+                #     "greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][dev_samples:],
+                #     "attention_features": stats["train_attention_features"][dev_tokens-dev_samples:],
+                #     "train_input_texts": stats["train_input_texts"][:dev_samples],
+                #     "train_target_texts": stats["train_target_texts"][:dev_samples],
+                #     "train_greedy_texts": stats["train_greedy_texts"][:dev_samples],
+                #     "train_greedy_tokens": stats["train_greedy_tokens"][:dev_samples],
+                #     "train_greedy_log_probs": stats["train_greedy_log_probs"][:dev_samples],
+                #     "train_greedy_log_likelihoods": stats["train_greedy_log_likelihoods"][:dev_samples],
+                #     "train_attention_features": stats["train_attention_features"][:dev_tokens-dev_samples],
+                # }
+                # tad = np.array(self.tad(tad_stats))
+                # self.tad.is_fitted = False
+                # X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1), tad.reshape(-1, 1)])
             else:
                 X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1)])
             
-            target = self.train_seq_metrics[dev_samples:]
+            target = self.train_seq_metrics[dev_idx]
             target[np.isnan(target)] = 0
             if self.tgt_norm:
                 y = 1 - rankdata(target)
@@ -669,55 +671,59 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
                 stats["train_token_metrics"] = self.train_token_metrics
             
             train_mds = []
-            dev_size = 0.5
-            dev_samples = int(len(train_greedy_texts) * dev_size)
-            len_tokens = [len(tokens) for tokens in train_greedy_tokens]
-            dev_tokens = np.sum(len_tokens[:dev_samples])
+            dev_size = 0.5 
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
+            tokens_before = np.cumsum(lens)
+            token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
+            token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
                 
             for layer in self.hidden_layers:
                 if layer == -1:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
-                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
-                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
-                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[:dev_tokens],
-                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[dev_tokens:],
-                                   "claims": train_claims[dev_samples:],
-                                   "train_claims": train_claims[:dev_samples],
-                                   "train_input_texts": train_input_texts[:dev_samples],
+                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   "train_greedy_texts":[train_greedy_texts[k] for k in train_idx],
+                                   "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   "train_target_texts": [train_target_texts[k] for k in train_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[token_dev_idx],
+                                   "claims": [train_claims[k] for k in dev_idx],
+                                   "train_claims": [train_claims[k] for k in train_idx],
+                                   "train_input_texts": [train_input_texts[k] for k in train_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][:dev_tokens]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][dev_tokens:]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_train_idx]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_dev_idx]
                 else:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
-                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
-                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
-                                   "greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[:dev_tokens],
-                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[dev_tokens:],
-                                   "claims": train_claims[dev_samples:],
-                                   "train_claims": train_claims[:dev_samples],
-                                   "train_input_texts": train_input_texts[:dev_samples],
+                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
+                                   "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   "train_target_texts": [train_target_texts[k] for k in train_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_dev_idx],
+                                    "claims": [train_claims[k] for k in dev_idx],
+                                   "train_claims": [train_claims[k] for k in train_idx],
+                                   "train_input_texts": [train_input_texts[k] for k in train_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][:dev_tokens]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][dev_tokens:]
-
-                train_stats["factcheck"] = self.factcheck_score[:dev_samples]
-                train_stats["train_token_metrics"] = self.train_token_metrics[:dev_tokens]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_train_idx]
+                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_dev_idx]
+                    
+                train_stats["factcheck"] = [self.factcheck_score[i] for i in train_idx]
+                train_stats["train_token_metrics"] = self.train_token_metrics[token_train_idx]
 
 
                 if layer == -1:
                     hidden_layer = ""
                 else:
                     hidden_layer = f"_{layer}"
-            
-                centroid_key_ = f"centroid{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
-                covariance_key_ = f"covariance{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                    
+                centroid_key_ = f"centroid{hidden_layer}_{self.metric_thr}_{len(train_idx)}"
+                covariance_key_ = f"covariance{hidden_layer}_{self.metric_thr}_{len(train_idx)}"
 
-                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
-                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_thr}_{len(train_greedy_texts[:dev_samples])}"
+                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_thr}_{len(train_idx)}"
+                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_thr}_{len(train_idx)}"
 
                 if centroid_key_ in stats.keys():
                     train_stats[centroid_key_] = stats[centroid_key_]
@@ -750,12 +756,12 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
             train_dists = np.array(train_mds).T
             tmd_scores = []
             k = 0
-            for idx, tokens in enumerate(train_greedy_tokens[dev_samples:]):
+            for idx, tokens in enumerate([train_greedy_tokens[k] for k in dev_idx]):
                 dists_i = train_dists[k:k+len(tokens)]
                 k += len(tokens)
     
                 tmd_scores.append([])
-                for claim in train_claims[dev_samples:][idx]:
+                for claim in [train_greedy_tokens[k] for k in dev_idx][idx]:
                     tokens = np.array(claim.aligned_token_ids)
                     claim_p_i = dists_i[tokens]
                     
@@ -765,8 +771,6 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
                         tmd_scores[-1].append(claim_p_i.sum(axis=0))
 
             train_dists = np.concatenate(tmd_scores)
-            # np.save(f'{self.parameters_path}/train_dists_{str(self)}.npy', train_dists)
-            # np.save(f'{self.parameters_path}/train_token_metrics_{str(self)}.npy', self.train_token_metrics)
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
@@ -775,7 +779,7 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
             elif self.meta_model == "weights":
                 scores = []
                 for i in range(train_dists.shape[-1]):
-                    scores.append(get_prr(train_dists[:, i], self.train_token_metrics[dev_samples:]))
+                    scores.append(get_prr(train_dists[:, i], self.train_token_metrics[dev_idx]))
                 self.weights = np.array(scores)
                 self.weights /= np.abs(self.weights).sum()
                 
@@ -817,7 +821,7 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
                         cls_prr = []
                         for f in np.argwhere(clusters == cluster).flatten():
                             cls_features.append(f)
-                            cls_prr.append(np.abs(get_prr(train_dists[:, f], self.train_seq_metrics[dev_samples:])))
+                            cls_prr.append(np.abs(get_prr(train_dists[:, f], self.train_seq_metrics[dev_idx])))
                         features.append(cls_features[np.argmax(cls_prr)]) 
                     self.added = np.zeros_like(feats, dtype=bool)
                     self.added[features] = True
@@ -835,38 +839,38 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
                     self.pca = PCA(n_components=n_components)
                     X = self.pca.fit_transform(X)
 
-            msp = np.concatenate(self.msp({"greedy_log_likelihoods": stats[f"train_greedy_log_likelihoods"][dev_samples:],
-                                           "claims": train_claims[dev_samples:]}))
+            msp = np.concatenate(self.msp({"greedy_log_likelihoods": [stats[f"train_greedy_log_likelihoods"][i] for i in dev_idx],
+                                           "claims": [train_claims[i] for i in dev_idx]}))
             
-            ent_token = self.ent_calc({"greedy_log_probs": train_greedy_log_probs[dev_samples:]})["entropy"]
-            ent = np.concatenate(self.ent({"entropy": ent_token, "claims": train_claims[dev_samples:]}))
+            ent_token = self.ent_calc({"greedy_log_probs": [train_greedy_log_probs[i] for i in dev_idx]})["entropy"]
+            ent = np.concatenate(self.ent({"entropy": ent_token, "claims": [train_claims[i] for i in dev_idx]}))
 
             if self.use_ccp:
                 if self.ccp_context == "fact_pref":
                     train_greedy_tokens_alternatives = stats[f"train_greedy_tokens_alternatives"]
                     train_greedy_tokens_alternatives_fact_pref_nli = stats[f"train_greedy_tokens_alternatives_fact_pref_nli"]
     
-                    train_stats = {"greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   "greedy_tokens_alternatives": train_greedy_tokens_alternatives[dev_samples:],
-                                   "greedy_tokens_alternatives_fact_pref_nli": train_greedy_tokens_alternatives_fact_pref_nli[dev_samples:],
-                                   "claims": train_claims[dev_samples:],}
+                    train_stats = {"greedy_tokens": [train_greedy_tokens[i] for i in dev_idx], 
+                                   "greedy_tokens_alternatives": [train_greedy_tokens_alternatives[i] for i in dev_idx],
+                                   "greedy_tokens_alternatives_fact_pref_nli": [train_greedy_tokens_alternatives_fact_pref_nli[i] for i in dev_idx],
+                                   "claims": [train_claims[i] for i in dev_idx],}
 
                 else:
                     train_greedy_tokens_alternatives = stats[f"train_greedy_tokens_alternatives"]
                     train_greedy_tokens_alternatives_nli = stats[f"train_greedy_tokens_alternatives_nli"]
     
-                    train_stats = {"greedy_tokens": train_greedy_tokens[dev_samples:], 
-                                   "greedy_tokens_alternatives": train_greedy_tokens_alternatives[dev_samples:],
-                                   "greedy_tokens_alternatives_nli": train_greedy_tokens_alternatives_nli[dev_samples:],
-                                   "claims": train_claims[dev_samples:],}
+                    train_stats = {"greedy_tokens": [train_greedy_tokens[i] for i in dev_idx], 
+                                   "greedy_tokens_alternatives": [train_greedy_tokens_alternatives[i] for i in dev_idx],
+                                   "greedy_tokens_alternatives_nli": [train_greedy_tokens_alternatives_nli[i] for i in dev_idx],
+                                   "claims": [train_claims[i] for i in dev_idx],}
                     
                 ccp = np.concatenate(self.ccp(train_stats))
                 X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1), ccp.reshape(-1, 1)])
             else:
                 X = np.hstack([X, msp.reshape(-1, 1), ent.reshape(-1, 1)])
             
-            n_claims = len(np.concatenate(train_claims[dev_samples:]))
-            target = np.concatenate(self.factcheck_score)[-n_claims:]
+            n_claims = len(np.concatenate([train_claims[i] for i in dev_idx]))
+            target = np.concatenate([self.factcheck_score[i] for i in dev_idx])
             target[np.isnan(target)] = 0
             if self.tgt_norm:
                 y = rankdata(target)
