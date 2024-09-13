@@ -157,7 +157,7 @@ class SAPLMA(Estimator):
         metric_name: str = "",
         aggregated: bool = False,
         device: str = "cuda",
-        cv_hp: bool = False
+        cv_hp: bool = False,
     ):
         self.hidden_layer = hidden_layer
         if self.hidden_layer == -1:
@@ -190,6 +190,7 @@ class SAPLMA(Estimator):
                                             lr=param[2],
                                             n_features=param[3],
                                             regression=param[4])
+        self.aggregated = aggregated
         if metric is not None:
             self.metric = metric
             if aggregated:
@@ -215,8 +216,23 @@ class SAPLMA(Estimator):
             train_greedy_texts = stats[f"train_greedy_texts"]
             train_greedy_tokens = stats[f"train_greedy_tokens"]
             train_target_texts = stats[f"train_target_texts"]
-            self.train_seq_metrics = np.array([self.metric({"greedy_texts": [x], "target_texts": [y]}, [y], [y])[0]
-                                              for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens)])
+            
+            metric_key = f"train_seq_{self.metric_name}_{len(train_greedy_texts)}"
+            if metric_key in stats.keys():
+                self.train_seq_metrics = stats[metric_key]
+            else:   
+                metrics = []
+                for x, y, x_t in zip(train_greedy_texts, train_target_texts, train_greedy_tokens):
+                    if isinstance(y, list) and (not self.aggregated):
+                        y_ = y[0]
+                    elif isinstance(y, str) and (self.aggregated):
+                        y_ = [y]
+                    else:
+                        y_ = y
+                    metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0])
+                self.train_seq_metrics = np.array(metrics)
+                stats[metric_key] = self.train_seq_metrics
+                
             train_embeddings = stats[f"train_embeddings_{self.embeddings_type}{hidden_layer}"]
             train_embeddings[np.isnan(train_embeddings)] = 0
             self.train_seq_metrics[np.isnan(self.train_seq_metrics)] = 0
