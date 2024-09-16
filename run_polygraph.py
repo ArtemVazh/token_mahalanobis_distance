@@ -310,17 +310,18 @@ def get_density_based_ue_methods(args, model_type):
                 normalize = getattr(args, "normalize", False),
             )
         rougel = RougeMetric("rougeL")
-        if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
-            if args.dataset == ['truthful_qa', 'generation']:
-                alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
+        if getattr(args, "run_proposed_methods", False):
+            if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
+                if args.dataset == ['truthful_qa', 'generation']:
+                    alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
+                else:
+                    alignscorer = AlignScore(batch_size=1)
+                metrics = [accuracy, alignscorer]
+                metrics_names = ["Accuracy", "AlignScore"]
             else:
-                alignscorer = AlignScore(batch_size=1)
-            metrics = [accuracy, alignscorer]
-            metrics_names = ["Accuracy", "AlignScore"]
-        else:
-            alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
-            metrics = [rougel, alignscorer]
-            metrics_names = ["Rouge-L", "AlignScore"]
+                alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
+                metrics = [rougel, alignscorer]
+                metrics_names = ["Rouge-L", "AlignScore"]
 
         layers = getattr(args, "layers", [0, -1])
         metric_thrs = getattr(args, "metric_thrs", [0.3])            
@@ -363,30 +364,40 @@ def get_density_based_ue_methods(args, model_type):
                                 SAPLMA_truefalse("decoder", parameters_path=None, aggregated=False, hidden_layer=layer, device=getattr(args, "md_device", "cpu")),
                             ]
 
-            if getattr(args, "run_layerwise_methods", False):
+            if getattr(args, "run_baselines", False) or getattr(args, "run_layerwise_methods", False):
                 #layer-wise methods
                 for layer in layers:
                     estimators += [
                         MahalanobisDistanceSeq("decoder", parameters_path=None, hidden_layer=layer, storage_device=getattr(args, "md_device", "cpu")),
                         RelativeMahalanobisDistanceSeq("decoder", parameters_path=None, hidden_layer=layer, storage_device=getattr(args, "md_device", "cpu")),
-                        RDESeq("decoder", parameters_path=None, hidden_layer=layer),
                         
-                        # EigenScore(hidden_layer=layer),
-                        EigenScore("sample_embeddings_last_token", hidden_layer=layer),
-
                         TokenMahalanobisDistance("decoder", parameters_path=None, hidden_layer=layer, storage_device=getattr(args, "md_device", "cpu")),
                         RelativeTokenMahalanobisDistance("decoder", parameters_path=None, hidden_layer=layer, storage_device=getattr(args, "md_device", "cpu")),
                     ]
+                    if getattr(args, "run_rde", True):
+                        estimators += [
+                            RDESeq("decoder", parameters_path=None, hidden_layer=layer),
+                        ]
+                        
+                    if getattr(args, "run_eigenscore", True):
+                        estimators += [
+                            # EigenScore(hidden_layer=layer),
+                            EigenScore("sample_embeddings_last_token", hidden_layer=layer),
+                        ]
+                    
+            if getattr(args, "run_proposed_methods", False):
+                #layer-wise methods
+                for layer in layers:
                     for metric, metric_name in zip(metrics, metrics_names):
                         estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                         for thr in metric_thrs:
                             estimators += [TokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu")),
                                            RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu"))]
             
-            if getattr(args, "run_meta_methods", False):
+            
                 # meta methods
                 for metric, metric_name in zip(metrics, metrics_names):
-                    estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device="cuda", cv_hp=False)]
+                    estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device="cuda", cv_hp=True)]
                     for thr in metric_thrs:
                         estimators += [
                                     LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
