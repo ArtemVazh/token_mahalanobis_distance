@@ -21,6 +21,7 @@ class EigenScore(Estimator):
         super().__init__([f"{embeddings}{self.hidden_layer_name}"], "sequence")
         self.embeddings = embeddings
         self.alpha = alpha
+        self.J_d = None
 
     def __str__(self):
         return f"EigenScore {self.embeddings}{self.hidden_layer_name}"
@@ -30,9 +31,10 @@ class EigenScore(Estimator):
         ue = []
         for embeddings in sample_embeddings:
             sentence_embeddings = np.array(embeddings)
-            dim = sentence_embeddings.shape[-1]
-            J_d = np.eye(dim) - 1 / dim * np.ones((dim, dim))
-            covariance = sentence_embeddings @ J_d @ sentence_embeddings.T
+            if self.J_d is None:
+                dim = sentence_embeddings.shape[-1]
+                self.J_d = np.eye(dim) - 1 / dim * np.ones((dim, dim))
+            covariance = sentence_embeddings @ self.J_d @ sentence_embeddings.T
             reg_covariance = covariance + self.alpha * np.eye(covariance.shape[0])
             eigenvalues, _ = np.linalg.eig(reg_covariance)
             ue.append(np.mean(np.log([val if val > 0 else 1e-10 for val in eigenvalues])))
