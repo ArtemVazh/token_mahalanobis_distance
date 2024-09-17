@@ -15,7 +15,7 @@ class Dataset:
     Seq2seq dataset for calculating quality of uncertainty estimation method.
     """
 
-    def __init__(self, x: List[str], y: List[str], batch_size: int):
+    def __init__(self, x: List[str], y: List[str], max_new_tokens: int, batch_size: int):
         """
         Parameters:
             x (List[str]): a list of input texts.
@@ -24,6 +24,7 @@ class Dataset:
         """
         self.x = x
         self.y = y
+        self.max_new_tokens = [max_new_tokens] * len(self.x)
         self.batch_size = batch_size
 
     def __iter__(self) -> Iterable[Tuple[List[str], List[str]]]:
@@ -33,7 +34,7 @@ class Dataset:
                 returns list of input texts and list of corresponding output texts.
         """
         for i in range(0, len(self.x), self.batch_size):
-            yield self.x[i : i + self.batch_size], self.y[i : i + self.batch_size]
+            yield self.x[i : i + self.batch_size], self.y[i : i + self.batch_size], self.max_new_tokens[i : i + self.batch_size]
 
     def __len__(self) -> int:
         """
@@ -51,11 +52,13 @@ class Dataset:
         """
         self.x = [self.x[i] for i in indices]
         self.y = [self.y[i] for i in indices]
+        self.max_new_tokens = [self.max_new_tokens[i] for i in indices]
         return self
 
-    def concat(self, x, y):
+    def concat(self, x, y, max_new_tokens):
         self.x = self.x + x
         self.y = self.y + y
+        self.max_new_tokens = self.max_new_tokens + max_new_tokens
         return self
 
 
@@ -80,18 +83,22 @@ class Dataset:
         
         X_train = [self.x[i] for i in train_indices]
         y_train = [self.y[i] for i in train_indices]
+        max_new_tokens_train = [self.max_new_tokens[i] for i in train_indices]
         
         X_test = [self.x[i] for i in test_indices]
         y_test = [self.y[i] for i in test_indices]
+        max_new_tokens_test = [self.max_new_tokens[i] for i in test_indices]
             
         if split == "train":
             self.x = X_train
             self.y = y_train
+            self.max_new_tokens = max_new_tokens_train
         else:
             self.x = X_test
             self.y = y_test
+            self.max_new_tokens = max_new_tokens_test
             
-        return X_train, X_test, y_train, y_test
+        return X_train, X_test, y_train, y_test, max_new_tokens_train, max_new_tokens_test
 
     def kfolds(self, seed, n_folds=5):
         kf = KFold(n_splits=n_folds, random_state=seed, shuffle=True)
@@ -178,6 +185,7 @@ class Dataset:
         few_shot_split: str = "train",
         split: str = "test",
         size: int = None,
+        max_new_tokens: int = 100,
         **kwargs,
     ):
         """
@@ -439,7 +447,7 @@ class Dataset:
             x = dataset[x_column]
             y = dataset[y_column]
 
-        return Dataset(x, y, batch_size)
+        return Dataset(x, y, max_new_tokens, batch_size)
 
     @staticmethod
     def load(csv_path, *args, **kwargs):
