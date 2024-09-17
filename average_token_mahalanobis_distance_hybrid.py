@@ -323,8 +323,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                                    f"token_embeddings_{self.embeddings_type}": train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_train_idx]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_dev_idx]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"]
                 else:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
                     train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
@@ -335,8 +334,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                                    f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_train_idx]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_dev_idx]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"]
                     
                 metric_key = f"train_{self.metric_md_name}_{len(train_greedy_texts)}"
                 if metric_key in stats.keys():
