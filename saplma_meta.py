@@ -21,6 +21,7 @@ from lm_polygraph.estimators.mahalanobis_distance import (
 )
 from sklearn.metrics import mean_squared_error, roc_auc_score
 from sklearn.linear_model import Ridge, RidgeCV
+from sklearn.model_selection import train_test_split
 from saplma import SAPLMA
 
 class SAPLMA_meta(Estimator):
@@ -98,31 +99,32 @@ class SAPLMA_meta(Estimator):
                 stats[metric_key] = self.train_seq_metrics
             self.train_seq_metrics[np.isnan(self.train_seq_metrics)] = 0
             train_saplmas = []
-            dev_size = 0.5
-            dev_samples = int(len(train_greedy_texts) * dev_size)
+            
+            dev_size = 0.5 
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
                 
-            for layer in self.hidden_layers:
+            for layer in self.hidden_layers:                        
                 if layer == -1:
                     train_embeddings = stats[f"train_embeddings_{self.embeddings_type}"]
-                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
-                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
-                                   "train_target_texts": train_target_texts[:dev_samples],
-                                   f"train_embeddings_{self.embeddings_type}": train_embeddings[:dev_samples],
-                                   f"embeddings_{self.embeddings_type}": train_embeddings[dev_samples:],
+                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
+                                   "train_target_texts": [train_target_texts[k] for k in train_idx],
+                                   f"train_embeddings_{self.embeddings_type}": train_embeddings[train_idx],
+                                   f"embeddings_{self.embeddings_type}": train_embeddings[dev_idx],
                                   }                
                 else:
                     train_embeddings = stats[f"train_embeddings_{self.embeddings_type}_{layer}"]
-                    train_stats = {"train_greedy_tokens": train_greedy_tokens[:dev_samples], 
-                                   "train_greedy_texts": train_greedy_texts[:dev_samples],
-                                   "train_target_texts": train_target_texts[:dev_samples],
-                                   f"train_embeddings_{self.embeddings_type}_{layer}": train_embeddings[:dev_samples],
-                                   f"embeddings_{self.embeddings_type}_{layer}": train_embeddings[dev_samples:],
+                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
+                                   "train_target_texts": [train_target_texts[k] for k in train_idx],
+                                   f"train_embeddings_{self.embeddings_type}_{layer}": train_embeddings[train_idx],
+                                   f"embeddings_{self.embeddings_type}_{layer}": train_embeddings[dev_idx],
                                   }
                 score = self.saplmas[layer](train_stats).reshape(-1)
                 self.saplmas[layer].is_fitted = False
                 train_saplmas.append(score)
             train_scores = np.array(train_saplmas).T
-            self.ue_predictor.fit(train_scores, 1 - self.train_seq_metrics[dev_samples:])
+            self.ue_predictor.fit(train_scores, 1 - self.train_seq_metrics[dev_idx])
             self.is_fitted = True
 
         eval_scores = []
