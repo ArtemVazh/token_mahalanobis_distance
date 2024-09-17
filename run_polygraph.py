@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 import json
 import copy
+import codecs
 
 import logging
 
@@ -81,11 +82,13 @@ def main(args):
         
         model = WhiteboxModel.from_pretrained(
             args.model.path,
-            generation_params=getattr(args, "generation_params", {}),
+            getattr(args, "generation_params", {}),
+            device_map=args.model.device_map,
+            add_bos_token=getattr(args.model, "add_bos_token", True),
             **cache_kwargs,
-            **model_kwargs
+            **model_kwargs,
         )
-
+        
         if args.model.ensemble:
             # Only MC-ensembles for now
             log.info(f"Creating ensemble...")
@@ -116,6 +119,7 @@ def main(args):
             few_shot_split=getattr(args, "few_shot_split", "train"),
             split=args.eval_split,
             load_from_disk=args.load_from_disk,
+            max_new_tokens=getattr(args, f"max_new_tokens", 100),
             **cache_kwargs
         )
 
@@ -143,14 +147,15 @@ def main(args):
                     split=args.train_split,
                     size=10_000,
                     load_from_disk=args.load_from_disk,
+                    max_new_tokens=getattr(args, f"max_new_tokens", 100),
                     **cache_kwargs
                 )
             elif args.train_test_split:
-                X_train, X_test, y_train, y_test = dataset.train_test_split(
+                X_train, X_test, y_train, y_test, max_new_tokens_train, max_new_tokens_test = dataset.train_test_split(
                     test_size=args.test_split_size, seed=seed, split=args.eval_split
                 )
                 train_dataset = Dataset(
-                    x=X_train, y=y_train, batch_size=args.batch_size
+                    x=X_train, y=y_train, max_new_tokens=getattr(args, "max_new_tokens", 100), batch_size=args.batch_size
                 )
             else:
                 train_dataset = Dataset.load(
@@ -166,6 +171,7 @@ def main(args):
                     split=args.train_split,
                     size=10_000,
                     load_from_disk=args.load_from_disk,
+                    max_new_tokens=getattr(args, f"max_new_tokens", 100),
                     **cache_kwargs
                 )
             if args.subsample_train_dataset != -1:
@@ -181,12 +187,13 @@ def main(args):
                         getattr(args, f"train_text_column_{k_ds}"),
                         getattr(args, f"train_label_column_{k_ds}"),
                         batch_size=args.batch_size,
-                        prompt=getattr(args, f"train_prompt_{k_ds}"),
-                        description=getattr(args, f"train_description_{k_ds}", ""),
+                        prompt=codecs.decode(getattr(args, f"train_prompt_{k_ds}"), 'unicode_escape'),
+                        description=codecs.decode(getattr(args, f"train_description_{k_ds}", ""), 'unicode_escape'),
                         mmlu_max_subject_size=getattr(args, "mmlu_max_subject_size", 100),
                         n_shot=getattr(args, f"train_n_shot_{k_ds}", 5),
                         few_shot_split=getattr(args, f"few_shot_split_{k_ds}", "train"),
                         split=getattr(args, f"train_split_{k_ds}", "train"),
+                        max_new_tokens=getattr(args, f"max_new_tokens_{k_ds}", 100),
                         size=10_000,
                         load_from_disk=args.load_from_disk,
                         **cache_kwargs
@@ -194,11 +201,12 @@ def main(args):
                     k_ds += 1
                     if args.subsample_train_dataset != -1:
                         train_dataset_k.subsample(args.subsample_train_dataset, seed=seed)
+                    
                         
                     if train_dataset is None:
                         train_dataset = train_dataset_k
                     else:
-                        train_dataset.concat(train_dataset_k.x, train_dataset_k.y)
+                        train_dataset.concat(train_dataset_k.x, train_dataset_k.y, train_dataset_k.max_new_tokens)
 
         if any([not getattr(method, "is_fitted", False) for method in estimators]):
             background_train_dataset = Dataset.load(
@@ -289,9 +297,9 @@ def main(args):
 
 def get_ue_metrics(args):
     ue_metrics = [
-        ReversedPairsProportion(),
+        #ReversedPairsProportion(),
         PredictionRejectionArea(),
-        RiskCoverageCurveAUC(),
+        #RiskCoverageCurveAUC(),
     ]
     if getattr(args, "use_claim_ue", False) or getattr(args, "train_claim_pi", False):
         ue_metrics += [
@@ -384,16 +392,16 @@ def get_density_based_ue_methods(args, model_type):
                             # EigenScore(hidden_layer=layer),
                             EigenScore("sample_embeddings_last_token", hidden_layer=layer),
                         ]
+                    for metric, metric_name in zip(metrics, metrics_names):
+                        estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                     
             if getattr(args, "run_proposed_methods", False):
                 #layer-wise methods
                 for layer in layers:
                     for metric, metric_name in zip(metrics, metrics_names):
-                        estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                         for thr in metric_thrs:
                             estimators += [TokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu")),
                                            RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu"))]
-            
             
                 # meta methods
                 for metric, metric_name in zip(metrics, metrics_names):
@@ -680,8 +688,8 @@ def get_generation_metrics(args):
             alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
             
         result = [
-            RougeMetric("rouge1"),
-            RougeMetric("rouge2"),
+            #RougeMetric("rouge1"),
+            #RougeMetric("rouge2"),
             RougeMetric("rougeL"),
             #BertScoreMetric('rh'),
             #SbertMetric(),
@@ -715,8 +723,8 @@ def get_generation_metrics(args):
 
 def get_model_kwargs(args):
     model_kwargs = {}
-    if getattr(args.model, 'device_map', None):
-        model_kwargs['device_map'] = args.model.device_map
+    # if getattr(args.model, 'device_map', None):
+    #     model_kwargs['device_map'] = args.model.device_map
     if getattr(args.model, 'attn_implementation', None):
         model_kwargs['attn_implementation'] = args.model.attn_implementation
 
