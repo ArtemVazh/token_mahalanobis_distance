@@ -232,9 +232,7 @@ class SAPLMA(Estimator):
                     metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0])
                 self.train_seq_metrics = np.array(metrics)
                 stats[metric_key] = self.train_seq_metrics
-                
-            train_embeddings = stats[f"train_embeddings_{self.embeddings_type}{hidden_layer}"]
-            train_embeddings[np.isnan(train_embeddings)] = 0
+            
             self.train_seq_metrics[np.isnan(self.train_seq_metrics)] = 0
             train_embeddings = create_cuda_tensor_from_numpy(
                 stats[f"train_embeddings_{self.embeddings_type}{hidden_layer}"]

@@ -62,12 +62,14 @@ class GRUNet(nn.Module):
 
         return x
 
-
 class TriDataset(torch_data.Dataset):
     """Custom Dataset for loading and processing the data."""
 
-    def __init__(self, features, labels, source=None, transform=None, test_stage=False):
+    def __init__(self, embeddings, features, mean, std, labels, source=None, transform=None, test_stage=False):
+        self.embeddings = embeddings
         self.features = features
+        self.mean = mean
+        self.std = std
         self.labels = labels
         self.source = source
         self.transform = transform
@@ -75,14 +77,21 @@ class TriDataset(torch_data.Dataset):
 
     def __len__(self):
         return len(self.labels)
+    
+    def process_embeddings(self, embeddings):
+        return (embeddings - self.mean) / self.std
 
     def __getitem__(self, index):
+        
+        anchor_embeds = self.process_embeddings(np.array([layer_embeds[index] for layer_embeds in self.embeddings]))
         anchor = self.features[index]
         anchor_label = self.labels[index]
         # positive
         pos_index = random.randint(0, len(self.labels) - 1)
         while self.labels[pos_index] != anchor_label:
             pos_index = random.randint(0, len(self.labels) - 1)
+            
+        positive_embeds = self.process_embeddings(np.array([layer_embeds[pos_index] for layer_embeds in self.embeddings]))
         positive = self.features[pos_index]
         positive_label = self.labels[pos_index]
 
@@ -90,18 +99,30 @@ class TriDataset(torch_data.Dataset):
         neg_index = random.randint(0, len(self.labels) - 1)
         while (self.labels[neg_index] == anchor_label) and (not self.test_stage):
             neg_index = random.randint(0, len(self.labels) - 1)
+            
+        negative_embeds = self.process_embeddings(np.array([layer_embeds[neg_index] for layer_embeds in self.embeddings]))
         negative = self.features[neg_index]
         negative_label = self.labels[neg_index]
+        
+        anchor = np.concatenate([anchor_embeds, anchor], axis=1)
+        positive = np.concatenate([positive_embeds, positive], axis=1)
+        negative = np.concatenate([negative_embeds, negative], axis=1)
         
         if self.transform is not None:
             anchor = self.transform(anchor)
             positive = self.transform(positive)
             negative = self.transform(negative)
-
-        return anchor, positive, negative, anchor_label, positive_label, negative_label
+            
+        return torch.from_numpy(anchor).float(), \
+            torch.from_numpy(positive).float(), \
+            torch.from_numpy(negative).float(), \
+            anchor_label, \
+            positive_label, \
+            negative_label
 
     def get_source(self):
         return self.source
+
 
 
 class CombinedTriNet(nn.Module):
@@ -338,6 +359,13 @@ def train_model(model, train_loader, dev_loader, support_loader, act_dim, squeez
             
     return best_model
 
+def compute_stats_activation_data(all_data, mean=None, std=None):
+    if mean is None:
+        mean = np.mean(all_data)
+    if std is None:
+        std = np.std(all_data)
+    return mean, std
+
 def process_activation_data(all_data, mean=None, std=None):
     if mean is None:
         mean = np.mean(all_data)
@@ -350,7 +378,7 @@ def process_rank_data(all_rank):
     a = -1
     all_rank = 1 / (a * (all_rank - 1) + 1 + 1e-7)
     return all_rank
-
+    
 class LLMFactoscope(Estimator):
     def __init__(
         self,
@@ -431,9 +459,7 @@ class LLMFactoscope(Estimator):
                 for tokens in train_greedy_tokens:
                     layer_embeddings.append(train_token_embeddings[k])
                     k += len(tokens)
-                embeddings.append(np.array(layer_embeddings))
-            #n_instances, n_layers, embed_dim
-            embeddings = np.asarray(embeddings).transpose(1, 0, 2)
+                embeddings.append(layer_embeddings)
             
             train_indices, dev_indices = train_test_split(list(range(len(self.seq_metrics))), test_size=0.2, random_state=42)
             train_indices, support_indices = train_test_split(train_indices, test_size=0.2, random_state=42)
@@ -449,25 +475,23 @@ class LLMFactoscope(Estimator):
             train_final_output_ranks = final_output_ranks[train_indices][:, :, None]
             train_topk_tokens_distance = topk_tokens_distance[train_indices]
             train_topk_prob = topk_prob[train_indices]
-            train_embeddings = embeddings[train_indices]
-            
+            train_embeddings = [[layer_emb[i] for i in train_indices] for layer_emb in embeddings]
+
             support_final_output_ranks = final_output_ranks[support_indices][:, :, None]
             support_topk_tokens_distance = topk_tokens_distance[support_indices]
             support_topk_prob = topk_prob[support_indices]
-            support_embeddings = embeddings[support_indices]
+            support_embeddings = [[layer_emb[i] for i in support_indices] for layer_emb in embeddings]
             
             dev_final_output_ranks = final_output_ranks[dev_indices][:, :, None]
             dev_topk_tokens_distance = topk_tokens_distance[dev_indices]
             dev_topk_prob = topk_prob[dev_indices]
-            dev_embeddings = embeddings[dev_indices]
+            dev_embeddings = [[layer_emb[i] for i in dev_indices] for layer_emb in embeddings]
 
-            train_embeddings_processed, self.mean, self.std = process_activation_data(train_embeddings)
+            self.mean, self.std = compute_stats_activation_data(train_embeddings)
             train_final_output_ranks_processed = process_rank_data(train_final_output_ranks)
             
-            support_embeddings_processed, _, _ = process_activation_data(support_embeddings, self.mean, self.std)
             support_final_output_ranks_processed = process_rank_data(support_final_output_ranks)
             
-            dev_embeddings_processed, _, _ = process_activation_data(dev_embeddings, self.mean, self.std)
             dev_final_output_ranks_processed = process_rank_data(dev_final_output_ranks)
 
             prob_resnet_model = models.resnet18(num_classes=self.emb_dim).train().cuda()
@@ -482,28 +506,30 @@ class LLMFactoscope(Estimator):
             act_resnet_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False).cuda()
             
             combined_model = CombinedTriNet(act_resnet_model, grunet_model, emb_dist_resnet_model, prob_resnet_model, emb_dim=self.emb_dim).cuda()  
-          
-            train_data = torch.from_numpy(np.concatenate((train_embeddings_processed, train_final_output_ranks_processed,
-                                                          train_topk_tokens_distance, train_topk_prob), axis=2)).float()
             
-            support_data = torch.from_numpy(np.concatenate((support_embeddings_processed, support_final_output_ranks_processed,
-                                                            support_topk_tokens_distance, support_topk_prob), axis=2)).float()
+            train_data = np.concatenate((train_final_output_ranks_processed, 
+                                train_topk_tokens_distance, train_topk_prob), axis=2)            
             
-            dev_data = torch.from_numpy(np.concatenate((dev_embeddings_processed, dev_final_output_ranks_processed,
-                                                        dev_topk_tokens_distance, dev_topk_prob), axis=2)).float()
+            support_data = np.concatenate((support_final_output_ranks_processed,
+                                           support_topk_tokens_distance, support_topk_prob), axis=2)            
             
+            dev_data = np.concatenate((dev_final_output_ranks_processed,
+                                       dev_topk_tokens_distance, dev_topk_prob), axis=2)
+                        
             train_seq_metrics = torch.tensor(train_seq_metrics, dtype=torch.long)
             support_seq_metrics = torch.tensor(support_seq_metrics, dtype=torch.long)
             dev_seq_metrics = torch.tensor(dev_seq_metrics, dtype=torch.long)
             
-            train_dataset = TriDataset(train_data, train_seq_metrics)
-            support_dataset = TriDataset(support_data, support_seq_metrics)
-            dev_dataset = TriDataset(dev_data, dev_seq_metrics)
+            self.dim = train_embeddings[0][0].shape[-1]
+            
+            train_dataset = TriDataset(train_embeddings, train_data, self.mean, self.std, train_seq_metrics)
+            support_dataset = TriDataset(support_embeddings, support_data, self.mean, self.std, support_seq_metrics)
+            dev_dataset = TriDataset(dev_embeddings, dev_data, self.mean, self.std, dev_seq_metrics)
                         
             train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True)
             self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False)
             dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False)
-            self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, train_embeddings_processed.shape[-1])
+            self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, self.dim)
             self.support_set_labels, self.support_set_output = None, None
             self.is_fitted = True
         
@@ -531,21 +557,17 @@ class LLMFactoscope(Estimator):
             for tokens in greedy_tokens:
                 layer_embeddings.append(token_embeddings[k])
                 k += len(tokens)
-            embeddings.append(np.array(layer_embeddings))
-        #n_instances, n_layers, embed_dim
-        embeddings = np.asarray(embeddings).transpose(1, 0, 2)
+            embeddings.append(layer_embeddings)
         
-        embeddings_processed, _, _ = process_activation_data(embeddings, self.mean, self.std)
         final_output_ranks_processed = process_rank_data(final_output_ranks)
         
-        data = torch.from_numpy(np.concatenate((embeddings_processed, final_output_ranks_processed,
-                                                topk_tokens_distance, topk_prob), axis=2)).float()
-        
-        dataset = TriDataset(data, torch.tensor(np.zeros(len(data)), dtype=torch.long), test_stage=True)
+        data = np.concatenate((final_output_ranks_processed, topk_tokens_distance, topk_prob), axis=2)
+
+        dataset = TriDataset(embeddings, data, self.mean, self.std, torch.tensor(np.zeros(len(data)), dtype=torch.long), test_stage=True)
         loader = torch_data.DataLoader(dataset, batch_size=1, shuffle=False)
 
         y_pred, self.support_set_labels, self.support_set_output = predict_model(self.ue_predictor, loader, self.support_loader, 
-                                                                                 embeddings_processed.shape[-1],
+                                                                                 self.dim,
                                                                                  support_set_labels=self.support_set_labels, support_set_output=self.support_set_output,
                                                                                  squeeze_dim=1,  return_new_dist=self.return_new_dist, return_dist=self.return_dist)
         if self.return_dist:
@@ -629,9 +651,8 @@ class LLMFactoscopeAll(Estimator):
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
                 else:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
-                embeddings.append(np.array(train_token_embeddings))
-            #n_instances, n_layers, embed_dim
-            embeddings = np.array(embeddings).transpose(1, 0, 2)
+                embeddings.append(train_token_embeddings)
+                
             
             n_samples = len(self.token_metrics)
             if n_samples > self.max_train_size:
@@ -654,30 +675,28 @@ class LLMFactoscopeAll(Estimator):
             train_final_output_ranks = final_output_ranks[train_indices][:, :, None]
             train_topk_tokens_distance = topk_tokens_distance[train_indices]
             train_topk_prob = topk_prob[train_indices]
-            train_embeddings = embeddings[train_indices]
+            train_embeddings = [[layer_emb[i] for i in train_indices] for layer_emb in embeddings]
             
             support_final_output_ranks = final_output_ranks[support_indices][:, :, None]
             support_topk_tokens_distance = topk_tokens_distance[support_indices]
             support_topk_prob = topk_prob[support_indices]
-            support_embeddings = embeddings[support_indices]
+            support_embeddings = [[layer_emb[i] for i in support_indices] for layer_emb in embeddings]
             
             dev_final_output_ranks = final_output_ranks[dev_indices][:, :, None]
             dev_topk_tokens_distance = topk_tokens_distance[dev_indices]
             dev_topk_prob = topk_prob[dev_indices]
-            dev_embeddings = embeddings[dev_indices]
-            del embeddings, topk_prob, topk_tokens_distance, final_output_ranks
+            dev_embeddings = [[layer_emb[i] for i in dev_indices] for layer_emb in embeddings]
+            del topk_prob, topk_tokens_distance, final_output_ranks
 
-            train_embeddings_processed, self.mean, self.std = process_activation_data(train_embeddings)
+            self.mean, self.std = compute_stats_activation_data(train_embeddings)
             train_final_output_ranks_processed = process_rank_data(train_final_output_ranks)
-            del train_embeddings, train_final_output_ranks
+            del train_final_output_ranks
             
-            support_embeddings_processed, _, _ = process_activation_data(support_embeddings, self.mean, self.std)
             support_final_output_ranks_processed = process_rank_data(support_final_output_ranks)
-            del support_embeddings, support_final_output_ranks
+            del support_final_output_ranks
             
-            dev_embeddings_processed, _, _ = process_activation_data(dev_embeddings, self.mean, self.std)
             dev_final_output_ranks_processed = process_rank_data(dev_final_output_ranks)
-            del dev_embeddings, dev_final_output_ranks
+            del dev_final_output_ranks
 
             prob_resnet_model = models.resnet18(num_classes=self.emb_dim).train().cuda()
             prob_resnet_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False).cuda()
@@ -691,32 +710,35 @@ class LLMFactoscopeAll(Estimator):
             act_resnet_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False).cuda()
             
             combined_model = CombinedTriNet(act_resnet_model, grunet_model, emb_dist_resnet_model, prob_resnet_model, emb_dim=self.emb_dim).cuda()  
-                    
-            train_data = torch.from_numpy(np.concatenate((train_embeddings_processed, train_final_output_ranks_processed,
-                                                          train_topk_tokens_distance, train_topk_prob), axis=2)).float()
-            dim = train_embeddings_processed.shape[-1]
-            del train_embeddings_processed, train_final_output_ranks_processed, train_topk_tokens_distance, train_topk_prob
+                  
+            self.dim = train_embeddings[0][0].shape[-1]
+              
+            train_data = np.concatenate((train_final_output_ranks_processed, 
+                                         train_topk_tokens_distance, train_topk_prob), axis=2)
+            del train_final_output_ranks_processed, train_topk_tokens_distance, train_topk_prob
             
-            support_data = torch.from_numpy(np.concatenate((support_embeddings_processed, support_final_output_ranks_processed,
-                                                            support_topk_tokens_distance, support_topk_prob), axis=2)).float()
-            del support_embeddings_processed, support_final_output_ranks_processed, support_topk_tokens_distance, support_topk_prob
             
-            dev_data = torch.from_numpy(np.concatenate((dev_embeddings_processed, dev_final_output_ranks_processed,
-                                                        dev_topk_tokens_distance, dev_topk_prob), axis=2)).float()
-            del dev_embeddings_processed, dev_final_output_ranks_processed, dev_topk_tokens_distance, dev_topk_prob 
+            support_data = np.concatenate((support_final_output_ranks_processed,
+                                           support_topk_tokens_distance, support_topk_prob), axis=2)
+            del support_final_output_ranks_processed, support_topk_tokens_distance, support_topk_prob
+            
+            
+            dev_data = np.concatenate((dev_final_output_ranks_processed,
+                                       dev_topk_tokens_distance, dev_topk_prob), axis=2)
+            del dev_final_output_ranks_processed, dev_topk_tokens_distance, dev_topk_prob 
             
             train_token_metrics = torch.tensor(train_token_metrics, dtype=torch.long)
             support_token_metrics = torch.tensor(support_token_metrics, dtype=torch.long)
             dev_token_metrics = torch.tensor(dev_token_metrics, dtype=torch.long)
             
-            train_dataset = TriDataset(train_data, train_token_metrics)
-            support_dataset = TriDataset(support_data, support_token_metrics)
-            dev_dataset = TriDataset(dev_data, dev_token_metrics)
+            train_dataset = TriDataset(train_embeddings, train_data, self.mean, self.std, train_token_metrics)
+            support_dataset = TriDataset(support_embeddings, support_data, self.mean, self.std, support_token_metrics)
+            dev_dataset = TriDataset(dev_embeddings, dev_data, self.mean, self.std, dev_token_metrics)
                         
             train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True)
             self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False)
             dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False)
-            self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, dim)
+            self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, self.dim)
             self.support_set_labels, self.support_set_output = None, None
             self.is_fitted = True
             del train_dataset, dev_dataset
@@ -740,20 +762,16 @@ class LLMFactoscopeAll(Estimator):
                 token_embeddings = stats[f"token_embeddings_{self.embeddings_type}"]
             else:
                 token_embeddings = stats[f"token_embeddings_{self.embeddings_type}_{layer}"]
-            embeddings.append(np.array(token_embeddings))
-        #n_instances, n_layers, embed_dim
-        embeddings = np.array(embeddings).transpose(1, 0, 2)
+            embeddings.append(token_embeddings)
         
-        embeddings_processed, _, _ = process_activation_data(embeddings, self.mean, self.std)
         final_output_ranks_processed = process_rank_data(final_output_ranks)
-        
-        data = torch.from_numpy(np.concatenate((embeddings_processed, final_output_ranks_processed,
-                                                topk_tokens_distance, topk_prob), axis=2)).float()
-        dataset = TriDataset(data, torch.tensor(np.zeros(len(data)), dtype=torch.long), test_stage=True)
+
+        data = np.concatenate((final_output_ranks_processed, topk_tokens_distance, topk_prob), axis=2)
+        dataset = TriDataset(embeddings, data, self.mean, self.std, torch.tensor(np.zeros(len(data)), dtype=torch.long), test_stage=True)
         loader = torch_data.DataLoader(dataset, batch_size=1, shuffle=False)
 
         y_pred, self.support_set_labels, self.support_set_output = predict_model(self.ue_predictor, loader, self.support_loader, 
-                                                                                 embeddings_processed.shape[-1],
+                                                                                 self.dim,
                                                                                  support_set_labels=self.support_set_labels, support_set_output=self.support_set_output,
                                                                                  squeeze_dim=1, return_new_dist=self.return_new_dist, return_dist=self.return_dist)
         

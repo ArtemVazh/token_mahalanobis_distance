@@ -319,7 +319,7 @@ def get_density_based_ue_methods(args, model_type):
             )
         rougel = RougeMetric("rougeL")
         if getattr(args, "run_proposed_methods", False):
-            if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
+            if (args.task == "qa") and (args.dataset not in ["keivalya/MedQuad-MedicalQnADataset", "bigbio/pubmed_qa"]):
                 if args.dataset == ['truthful_qa', 'generation']:
                     alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
                 else:
@@ -330,7 +330,7 @@ def get_density_based_ue_methods(args, model_type):
                 alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
                 metrics = [rougel, alignscorer]
                 metrics_names = ["Rouge-L", "AlignScore"]
-
+    
         layers = getattr(args, "layers", [0, -1])
         metric_thrs = getattr(args, "metric_thrs", [0.3])            
     
@@ -392,13 +392,12 @@ def get_density_based_ue_methods(args, model_type):
                             # EigenScore(hidden_layer=layer),
                             EigenScore("sample_embeddings_last_token", hidden_layer=layer),
                         ]
-                    for metric, metric_name in zip(metrics, metrics_names):
-                        estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                     
             if getattr(args, "run_proposed_methods", False):
                 #layer-wise methods
                 for layer in layers:
                     for metric, metric_name in zip(metrics, metrics_names):
+                        estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                         for thr in metric_thrs:
                             estimators += [TokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu")),
                                            RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu"))]
@@ -409,7 +408,7 @@ def get_density_based_ue_methods(args, model_type):
                     for thr in metric_thrs:
                         estimators += [
                                     LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
-
+                                    
                                     LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
                                                                     metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
                                                                     aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,

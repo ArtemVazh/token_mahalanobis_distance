@@ -109,16 +109,16 @@ class SAPLMA_meta(Estimator):
                     train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
                                    "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_embeddings_{self.embeddings_type}": train_embeddings[train_idx],
-                                   f"embeddings_{self.embeddings_type}": train_embeddings[dev_idx],
+                                   f"train_embeddings_{self.embeddings_type}": [train_embeddings[k] for k in train_idx],
+                                   f"embeddings_{self.embeddings_type}": [train_embeddings[k] for k in dev_idx],
                                   }                
                 else:
                     train_embeddings = stats[f"train_embeddings_{self.embeddings_type}_{layer}"]
                     train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
                                    "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_embeddings_{self.embeddings_type}_{layer}": train_embeddings[train_idx],
-                                   f"embeddings_{self.embeddings_type}_{layer}": train_embeddings[dev_idx],
+                                   f"train_embeddings_{self.embeddings_type}_{layer}": [train_embeddings[k] for k in train_idx],
+                                   f"embeddings_{self.embeddings_type}_{layer}": [train_embeddings[k] for k in dev_idx],
                                   }
                 score = self.saplmas[layer](train_stats).reshape(-1)
                 self.saplmas[layer].is_fitted = False

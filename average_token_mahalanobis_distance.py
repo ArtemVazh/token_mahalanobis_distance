@@ -241,8 +241,8 @@ class LinRegTokenMahalanobisDistance(Estimator):
                                    "train_greedy_texts":[train_greedy_texts[k] for k in train_idx],
                                    "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[token_train_idx],
-                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[token_dev_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_train_idx], #train_token_embeddings[token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_dev_idx], #train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
                         train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"]
@@ -252,8 +252,8 @@ class LinRegTokenMahalanobisDistance(Estimator):
                                    "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
                                    "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_train_idx],
-                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_dev_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_train_idx], #train_token_embeddings[token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_dev_idx], #train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
                         train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"]
