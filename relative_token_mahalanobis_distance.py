@@ -247,11 +247,11 @@ class RelativeTokenMahalanobisDistanceClaim(Estimator):
         device: str = "cuda",
         storage_device: str = "cuda",
     ):
-        self.hidden_layer = hidden_layer
+        self.hidden_layer = hidden_layer            
         if self.hidden_layer == -1:
-            super().__init__(["token_embeddings", "train_token_embeddings", "background_train_embeddings", "train_greedy_tokens", "train_target_texts"], "claim")
+            super().__init__(["token_embeddings", "train_token_embeddings", "background_train_token_embeddings", "train_greedy_tokens", "train_target_texts"], "claim")
         else:
-            super().__init__([f"token_embeddings_{self.hidden_layer}", f"train_token_embeddings_{self.hidden_layer}", f"background_train_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "claim")
+            super().__init__([f"token_embeddings_{self.hidden_layer}", f"train_token_embeddings_{self.hidden_layer}", f"background_train_token_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "claim")
         self.centroid_0 = None
         self.sigma_inv_0 = None
         self.parameters_path = parameters_path
