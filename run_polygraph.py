@@ -40,7 +40,7 @@ from token_knn import TokenKNN
 from average_token_mahalanobis_distance import LinRegTokenMahalanobisDistance, LinRegTokenMahalanobisDistance_Claim
 from average_token_mahalanobis_distance_hybrid import LinRegTokenMahalanobisDistance_Hybrid, LinRegTokenMahalanobisDistance_Hybrid_Claim
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
-from saplma import SAPLMA, SAPLMA_truefalse
+from saplma import SAPLMA, SAPLMAClaim, SAPLMA_truefalse
 from saplma_meta import SAPLMA_meta
 from factoscope import LLMFactoscope, LLMFactoscopeAll
 from eigenscore import EigenScore
@@ -537,6 +537,7 @@ def get_ue_methods(args, model):
         layers = getattr(args, "layers", [0, -1])
         metric_thrs = getattr(args, "metric_thrs", [0.0, 0.5])
         for layer in layers:
+            estimators += [SAPLMAClaim("decoder", hidden_layer=layer)]
             for thr in metric_thrs:
                 estimators += [TokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr),
                                RelativeTokenMahalanobisDistanceClaim("decoder", hidden_layer=layer, metric_thr=thr)]  
