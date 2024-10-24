@@ -245,7 +245,7 @@ class TokenMahalanobisDistanceClaim(Estimator):
         self.aggregation = aggregation
         self.device = device
         self.storage_device = storage_device
-        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o")
+        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o-mini")
         
         # if self.parameters_path is not None:
         #     self.full_path = f"{self.parameters_path}/tmd_{self.hidden_layer}_{self.embeddings_type}_{self.aggregation}_{self.metric_name}_{self.metric_thr}"
