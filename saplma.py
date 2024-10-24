@@ -58,9 +58,10 @@ class MLP:
             self.loss = nn.BCELoss()
         self.model = MLP_NN(n_features, regression)
         self.optimizer = optim.AdamW(self.model.parameters(), lr=lr)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = "cuda"
 
     def fit(self, X, y):
+        self.model.train()
         if not isinstance(X, torch.Tensor):
             X_torch = torch.tensor(X, dtype=torch.float32)
         else:
@@ -72,7 +73,6 @@ class MLP:
         batch_start = torch.arange(0, len(X), self.batch_size)
         self.model.to(self.device)
         for epoch in range(self.n_epochs):
-            self.model.train()
             for start in batch_start:
                 X_batch = X_torch[start:start+self.batch_size].to(self.device)
                 y_batch = y_torch[start:start+self.batch_size].to(self.device)
@@ -90,7 +90,7 @@ class MLP:
         batch_start = torch.arange(0, len(X), self.batch_size)
         self.model.eval()
         prediction = []
-        if next(self.model.parameters()).device.type != self.device.type:
+        if next(self.model.parameters()).device.type != self.device:
             self.model.to(self.device)
         for start in batch_start:
             X_batch = X_torch[start:start+self.batch_size].to(self.device)

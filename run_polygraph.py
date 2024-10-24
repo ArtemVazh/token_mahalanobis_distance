@@ -319,17 +319,18 @@ def get_density_based_ue_methods(args, model_type):
             )
         rougel = RougeMetric("rougeL")
         if getattr(args, "run_proposed_methods", False):
-            if (args.task == "qa") and (args.dataset not in ["keivalya/MedQuad-MedicalQnADataset", "bigbio/pubmed_qa"]):
-                if args.dataset == ['truthful_qa', 'generation']:
+            if (args.task == "qa") and (args.dataset not in ["keivalya/MedQuad-MedicalQnADataset", "bigbio/pubmed_qa", ['truthful_qa', 'generation']]):
+                if getattr(args, "is_ood", False):
                     alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
+                    metrics = [alignscorer]
+                    metrics_names = ["AlignScore"]
                 else:
-                    alignscorer = AlignScore(batch_size=1)
-                metrics = [accuracy, alignscorer]
-                metrics_names = ["Accuracy", "AlignScore"]
+                    metrics = [accuracy]
+                    metrics_names = ["Accuracy"]
             else:
                 alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
-                metrics = [rougel, alignscorer]
-                metrics_names = ["Rouge-L", "AlignScore"]
+                metrics = [alignscorer]
+                metrics_names = ["AlignScore"]
     
         layers = getattr(args, "layers", [0, -1])
         metric_thrs = getattr(args, "metric_thrs", [0.3])            
@@ -404,7 +405,7 @@ def get_density_based_ue_methods(args, model_type):
             
                 # meta methods
                 for metric, metric_name in zip(metrics, metrics_names):
-                    estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device="cuda", cv_hp=True)]
+                    # estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device="cuda", cv_hp=True)]
                     for thr in metric_thrs:
                         estimators += [
                                     LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
@@ -679,11 +680,9 @@ def get_ue_methods(args, model):
 def get_generation_metrics(args):
     generation_metrics = getattr(args, "generation_metrics", None)
     if not generation_metrics:
-        if (args.task == "qa") and (args.dataset not in ["MedQuad", "pubmed_qa"]):
-            if args.dataset == ['truthful_qa', 'generation']:
-                alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
-            else:
-                alignscorer = AlignScore(batch_size=1)
+        
+        if (args.task == "qa") and  (args.dataset not in ["keivalya/MedQuad-MedicalQnADataset", "bigbio/pubmed_qa", ['truthful_qa', 'generation']]):
+            alignscorer = AlignScore(batch_size=1)
         else:
             alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
             

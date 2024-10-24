@@ -237,7 +237,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
             token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
             token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
                             
-            for layer in self.hidden_layers:
+            for layer in tqdm(self.hidden_layers):
                 if layer == -1:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
                     train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
