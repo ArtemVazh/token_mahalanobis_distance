@@ -41,7 +41,7 @@ use_ens_ue: false
 use_claim_ue: true
 generation_metrics: [{
   'name': 'OpenAIFactCheck',
-  'args': ['gpt-4o']
+  'args': ['gpt-4o-mini']
 
 }]
 ens_type:
