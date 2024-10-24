@@ -19,6 +19,7 @@ from lm_polygraph.estimators.mahalanobis_distance import (
     create_cuda_tensor_from_numpy,
     JITTERS
 )
+from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 from sklearn.metrics import mean_squared_error, roc_auc_score
 
 class MLP_NN(nn.Module):
@@ -250,6 +251,146 @@ class SAPLMA(Estimator):
         ue = self.ue_predictor.predict(embeddings)
 
         return ue
+
+
+class SAPLMAClaim(Estimator):
+    def __init__(
+        self,
+        embeddings_type: str = "decoder",
+        parameters_path: str = None,
+        normalize: bool = False,
+        aggregation: str = "mean",
+        hidden_layer: int = -1,
+        metric = None,
+        metric_name: str = "",
+        aggregated: bool = False,
+        device: str = "cuda",
+        cv_hp: bool = False,
+    ):
+        self.hidden_layer = hidden_layer
+        if self.hidden_layer == -1:
+            super().__init__(["train_token_embeddings", "token_embeddings", "train_greedy_tokens", "train_target_texts", "train_claims"], "claim")
+        else:
+            super().__init__([f"train_token_embeddings_{self.hidden_layer}", f"token_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts", "train_claims"], "claim")
+        self.centroid = None
+        self.sigma_inv = None
+        self.parameters_path = parameters_path
+        self.embeddings_type = embeddings_type
+        self.normalize = normalize
+        self.min = 1e100
+        self.max = -1e100
+        self.is_fitted = False
+        self.aggregation = aggregation
+        self.metric_name = metric_name
+        self.device = device
+        self.cv_hp = cv_hp
+        self.regression = False
+        self.ue_predictor = MLP(regression=self.regression)
+        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o-mini")
+        self.params = {
+                "n_epochs": [5, 10],
+                "batch_size": [64, 128],
+                "lr": [1e-3, 1e-4, 5e-5, 1e-5, 5e-6],
+                "n_features": [4096],
+                "regression": [self.regression]
+        }
+        self.model_init = lambda param: MLP(n_epochs=param[0],
+                                            batch_size=param[1],
+                                            lr=param[2],
+                                            n_features=param[3],
+                                            regression=param[4])
+
+    def __str__(self):
+        hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
+        cv = "cv, " if self.cv_hp else ""
+        return f"SAPLMAClaim_{self.embeddings_type}{hidden_layer} ({cv}{self.metric_name})"
+        
+    def _get_targets(self, greedy_tokens, claims, factcheck):
+        targets = []
+        for j in range(len(greedy_tokens)):
+            target = np.zeros_like(greedy_tokens[j]) + 1.0
+            true_tokens = []
+            false_tokens = []
+            for i, claim in enumerate(claims[j]):
+                if not np.isnan(factcheck[j][i]):
+                    for t in claim.aligned_token_ids:
+                         if factcheck[j][i] == 1:
+                             false_tokens.append(t)
+                         else:
+                             true_tokens.append(t)
+            final_true_tokens = np.array(list(set(true_tokens) - set(false_tokens)))
+            final_false_tokens = np.array(list(set(false_tokens) - set(true_tokens)))
+            if len(final_true_tokens):
+                target[final_true_tokens] = 1.0
+            if len(final_false_tokens):
+                target[final_false_tokens] = 0.0
+            target = np.clip(target, 0, 1)
+            targets.append(target)
+        return targets
+
+    def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
+        # take the embeddings
+        if self.hidden_layer == -1:
+            hidden_layer = ""
+        else:
+            hidden_layer = f"_{self.hidden_layer}"
+        embeddings = create_cuda_tensor_from_numpy(
+            stats[f"token_embeddings_{self.embeddings_type}{hidden_layer}"]
+        )
+        
+        # compute centroids if not given
+        if not self.is_fitted:
+            train_greedy_texts = stats[f"train_greedy_texts"]
+            train_greedy_tokens = stats[f"train_greedy_tokens"]
+            train_input_texts = stats[f"train_input_texts"]
+            train_claims = stats[f"train_claims"]
+            train_stats = {"claims": train_claims, "input_texts": train_input_texts}
+
+            if "factcheck" in stats.keys():
+                self.factcheck_score = stats["factcheck"]
+            else:
+                self.factcheck_score = self.factcheck(train_stats, None, None)
+                self.train_token_metrics = np.concatenate(self._get_targets(train_greedy_tokens, train_claims, self.factcheck_score))
+                stats["train_token_metrics"] = self.train_token_metrics                
+                stats["factcheck"] = self.factcheck_score
+            target = np.concatenate(self.factcheck_score)    
+            target[np.isnan(target)] = 0
+            train_embeddings = create_cuda_tensor_from_numpy(
+                stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+            )
+            train_embeddings_claims = []
+            for claims in train_claims:
+                for claim in claims:
+                    train_embeddings_claims.append(train_embeddings[np.array(claim.aligned_token_ids)].mean(0))
+            train_embeddings_claims = torch.stack(train_embeddings_claims)
+            
+            if self.cv_hp:
+                self.params["n_features"] = [train_embeddings_claims.shape[-1]]
+                best_params = cross_val_hp(train_embeddings_claims, target, self.model_init, self.params, regression=self.regression)
+                self.ue_predictor = self.model_init(best_params)
+            else:
+                self.ue_predictor = MLP(n_features=train_embeddings_claims.shape[-1], regression=self.regression)
+                
+            self.ue_predictor.fit(train_embeddings_claims, target)
+            self.is_fitted = True
+
+        embeddings_claims = []
+        claims = stats[f"claims"]
+        for seq_claim in claims:
+            for claim in seq_claim:
+                embeddings_claims.append(embeddings[np.array(claim.aligned_token_ids)].mean(0))
+        embeddings_claims = torch.stack(embeddings_claims)
+        claim_ues = self.ue_predictor.predict(embeddings_claims)
+
+        saplma_scores = []
+        k = 0
+        for idx, tokens in enumerate(stats["greedy_tokens"]):
+            saplma_scores.append([])
+            for _ in claims[idx]:
+                saplma_scores[-1].append(claim_ues[k])
+                k += 1
+        return saplma_scores
+
     
 class SAPLMA_truefalse(Estimator):
     ## use only with original truefalse dataset
