@@ -18,6 +18,7 @@ from sklearn.model_selection import train_test_split
 from torchvision import models
 from transformers import set_seed
 import time
+from tqdm import tqdm
 
 def seed_everything(seed):
     random.seed(seed)
@@ -71,6 +72,8 @@ class TriDataset(torch_data.Dataset):
         self.mean = mean
         self.std = std
         self.labels = labels
+        self.idx_ones = np.argwhere(labels == 1).flatten()
+        self.idx_zeros = np.argwhere(labels == 0).flatten()
         self.source = source
         self.transform = transform
         self.test_stage = test_stage
@@ -86,19 +89,25 @@ class TriDataset(torch_data.Dataset):
         anchor_embeds = self.process_embeddings(np.array([layer_embeds[index] for layer_embeds in self.embeddings]))
         anchor = self.features[index]
         anchor_label = self.labels[index]
+        
+        if self.test_stage:
+            anchor = np.concatenate([anchor_embeds, anchor], axis=1)
+            return torch.from_numpy(anchor).float(), \
+                torch.from_numpy(anchor).float(), \
+                torch.from_numpy(anchor).float(), \
+                anchor_label
+            
         # positive
-        pos_index = random.randint(0, len(self.labels) - 1)
-        while self.labels[pos_index] != anchor_label:
-            pos_index = random.randint(0, len(self.labels) - 1)
+        if anchor_label == 1:
+            pos_index = np.random.choice(self.idx_ones)
+            neg_index = np.random.choice(self.idx_zeros)
+        else:
+            pos_index = np.random.choice(self.idx_zeros)
+            neg_index = np.random.choice(self.idx_ones)
             
         positive_embeds = self.process_embeddings(np.array([layer_embeds[pos_index] for layer_embeds in self.embeddings]))
         positive = self.features[pos_index]
         positive_label = self.labels[pos_index]
-
-        # negative
-        neg_index = random.randint(0, len(self.labels) - 1)
-        while (self.labels[neg_index] == anchor_label) and (not self.test_stage):
-            neg_index = random.randint(0, len(self.labels) - 1)
             
         negative_embeds = self.process_embeddings(np.array([layer_embeds[neg_index] for layer_embeds in self.embeddings]))
         negative = self.features[neg_index]
@@ -116,9 +125,7 @@ class TriDataset(torch_data.Dataset):
         return torch.from_numpy(anchor).float(), \
             torch.from_numpy(positive).float(), \
             torch.from_numpy(negative).float(), \
-            anchor_label, \
-            positive_label, \
-            negative_label
+            anchor_label
 
     def get_source(self):
         return self.source
@@ -260,9 +267,9 @@ def test_model(model, test_loader, support_loader, act_dim, squeeze_dim=1):
     support_set_labels = []
     support_set_output = []
     with torch.no_grad():
-        for i, (support_data, _, _, support_label, _, _) in enumerate(support_loader):
+        for support_data, _, _, support_label in support_loader:
             support_data = support_data.unsqueeze(squeeze_dim).cuda()
-            if i == 0:
+            if len(support_set_output) == 0:
                 support_set_output = model(support_data, act_dim)
                 support_set_labels = support_label
             else:
@@ -273,7 +280,7 @@ def test_model(model, test_loader, support_loader, act_dim, squeeze_dim=1):
 
     # compare the distance between the embedding of the test image and the embedding of the support set
     with torch.no_grad():
-        for i, (anchor, _, _, anchor_label, _, _) in enumerate(test_loader):
+        for anchor, _, _, anchor_label in test_loader:
             anchor = anchor.unsqueeze(squeeze_dim).cuda()
             anchor_embedding = model(anchor, act_dim)
             anchor_embedding = anchor_embedding.squeeze()
@@ -297,9 +304,9 @@ def predict_model(model, test_loader, support_loader, act_dim, squeeze_dim=1, su
         support_set_labels = []
         support_set_output = []
         with torch.no_grad():
-            for i, (support_data, _, _, support_label, _, _) in enumerate(support_loader):
+            for support_data, _, _, support_label in support_loader:
                 support_data = support_data.unsqueeze(squeeze_dim).cuda()
-                if i == 0:
+                if len(support_set_output) == 0:
                     support_set_output = model(support_data, act_dim)
                     support_set_labels = support_label
                 else:
@@ -310,7 +317,7 @@ def predict_model(model, test_loader, support_loader, act_dim, squeeze_dim=1, su
 
     # compare the distance between the embedding of the test image and the embedding of the support set
     with torch.no_grad():
-        for i, (anchor, _, _, anchor_label, _, _) in enumerate(test_loader):
+        for anchor, _, _, anchor_label in test_loader:
             anchor = anchor.unsqueeze(squeeze_dim).cuda()
             anchor_embedding = model(anchor, act_dim)
             anchor_embedding = anchor_embedding.squeeze()
@@ -336,10 +343,10 @@ def train_model(model, train_loader, dev_loader, support_loader, act_dim, squeez
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     highest_acc = 0
     best_model = model
-    for epoch in range(epochs):
+    for epoch in tqdm(range(epochs)):
         model.train()
         train_loss = 0
-        for i, (anchor, positive, negative, _, _, _) in enumerate(train_loader):
+        for anchor, positive, negative, _ in train_loader:
             anchor = anchor.unsqueeze(squeeze_dim).cuda()
             positive = positive.unsqueeze(squeeze_dim).cuda()
             negative = negative.unsqueeze(squeeze_dim).cuda()
@@ -356,7 +363,7 @@ def train_model(model, train_loader, dev_loader, support_loader, act_dim, squeez
         if test_accuracy > highest_acc:
             highest_acc = test_accuracy
             best_model = copy.deepcopy(model)
-            
+        print(f"Epoch: {epoch}, Accuracy: {test_accuracy}")
     return best_model
 
 def compute_stats_activation_data(all_data, mean=None, std=None):
@@ -526,9 +533,9 @@ class LLMFactoscope(Estimator):
             support_dataset = TriDataset(support_embeddings, support_data, self.mean, self.std, support_seq_metrics)
             dev_dataset = TriDataset(dev_embeddings, dev_data, self.mean, self.std, dev_seq_metrics)
                         
-            train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True)
-            self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False)
-            dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False)
+            train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=8, pin_memory=True, sampler=None)
+            self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True, sampler=None)
+            dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False, num_workers=8, pin_memory=True, sampler=None)
             self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, self.dim)
             self.support_set_labels, self.support_set_output = None, None
             self.is_fitted = True
@@ -653,7 +660,6 @@ class LLMFactoscopeAll(Estimator):
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
                 embeddings.append(train_token_embeddings)
                 
-            
             n_samples = len(self.token_metrics)
             if n_samples > self.max_train_size:
                 size = self.max_train_size / n_samples
@@ -735,9 +741,9 @@ class LLMFactoscopeAll(Estimator):
             support_dataset = TriDataset(support_embeddings, support_data, self.mean, self.std, support_token_metrics)
             dev_dataset = TriDataset(dev_embeddings, dev_data, self.mean, self.std, dev_token_metrics)
                         
-            train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True)
-            self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False)
-            dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False)
+            train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True, pin_memory=True, sampler=None)
+            self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False, pin_memory=True, sampler=None)
+            dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False, pin_memory=True, sampler=None)
             self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, self.dim)
             self.support_set_labels, self.support_set_output = None, None
             self.is_fitted = True
