@@ -38,6 +38,9 @@ import scipy
 import scipy.cluster.hierarchy as sch
 from sklearn.decomposition import PCA
 
+import nltk
+nltk.download('stopwords')
+
 prr = PredictionRejectionArea()
 
 def get_prr(ue, metric):
@@ -448,16 +451,16 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
         self.device = device
         self.storage_device = storage_device
         self.tmds = {}
-        dependencies = ["train_greedy_tokens", "train_target_texts",  "claims", "train_claims"]
+        dependencies = ["train_greedy_tokens", "train_target_texts",  "claims", "train_claims"]        
         for layer in self.hidden_layers:
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += ["background_train_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
             else:
                 dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_token_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistanceClaim(
                     embeddings_type, None, normalize=False, metric_thr=metric_thr, aggregation="none", hidden_layer=layer, device=self.device, storage_device=self.storage_device
@@ -485,7 +488,7 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
         self.tgt_norm=tgt_norm
         self.remove_corr=remove_corr
         self.remove_alg=remove_alg
-        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o")
+        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o-mini")
         os.makedirs(self.parameters_path, exist_ok=True)
         
     
@@ -525,6 +528,7 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
 
             train_greedy_texts = stats[f"train_greedy_texts"]
             train_greedy_tokens = stats[f"train_greedy_tokens"]
+            train_target_texts = stats[f"train_target_texts"]
             train_input_texts = stats[f"train_input_texts"]
             train_claims = stats[f"train_claims"]
             train_stats = {"claims": train_claims, "input_texts": train_input_texts}
@@ -543,8 +547,8 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
             train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
             lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
             tokens_before = np.cumsum(lens)
-            token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
-            token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
+            token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx]).astype(int)
+            token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx]).astype(int)
                 
             for layer in self.hidden_layers:
                 if layer == -1:
@@ -553,31 +557,29 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                                    "train_greedy_texts":[train_greedy_texts[k] for k in train_idx],
                                    "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_token_embeddings_{self.embeddings_type}": train_token_embeddings[token_train_idx],
-                                   f"token_embeddings_{self.embeddings_type}": train_token_embeddings[token_dev_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_dev_idx],
                                    "claims": [train_claims[k] for k in dev_idx],
                                    "train_claims": [train_claims[k] for k in train_idx],
                                    "train_input_texts": [train_input_texts[k] for k in train_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_train_idx]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"][token_dev_idx]
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"]
                 else:
                     train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
                     train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
                                    "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
                                    "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_train_idx],
-                                   f"token_embeddings_{self.embeddings_type}_{layer}": train_token_embeddings[token_dev_idx],
+                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_train_idx],
+                                   f"token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_dev_idx],
                                     "claims": [train_claims[k] for k in dev_idx],
                                    "train_claims": [train_claims[k] for k in train_idx],
                                    "train_input_texts": [train_input_texts[k] for k in train_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_train_idx]
-                        train_stats[f"background_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"][token_dev_idx]
-                    
+                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"]
+
                 train_stats["factcheck"] = [self.factcheck_score[i] for i in train_idx]
                 train_stats["train_token_metrics"] = self.train_token_metrics[token_train_idx]
 
@@ -628,7 +630,7 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                 k += len(tokens)
     
                 tmd_scores.append([])
-                for claim in [train_greedy_tokens[k] for k in dev_idx][idx]:
+                for claim in [train_claims[k] for k in dev_idx][idx]:
                     tokens = np.array(claim.aligned_token_ids)
                     claim_p_i = dists_i[tokens]
                     
