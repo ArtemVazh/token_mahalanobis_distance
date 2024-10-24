@@ -286,11 +286,11 @@ class HUQ_LRTMD_Claim(Estimator):
             if layer == -1:
                 dependencies += ["token_embeddings", "train_token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += ["background_train_token_embeddings", "background_train_embeddings"]
             else:
                 dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
                 
         super().__init__(dependencies, "claim")
         self.parameters_path=parameters_path
@@ -310,7 +310,7 @@ class HUQ_LRTMD_Claim(Estimator):
         self.tgt_norm=tgt_norm
         self.remove_corr=remove_corr
         self.remove_alg=remove_alg
-        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o")
+        self.factcheck = OpenAIFactCheck(openai_model="gpt-4o-mini")
         os.makedirs(self.parameters_path, exist_ok=True)
 
         self.md = LinRegTokenMahalanobisDistance_Claim(embeddings_type, parameters_path=parameters_path, metric=metric, metric_name=metric_name, 
