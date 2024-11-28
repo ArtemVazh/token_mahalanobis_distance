@@ -20,7 +20,7 @@ from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
-from sklearn.linear_model import Ridge, RidgeCV
+from sklearn.linear_model import Ridge, RidgeCV, Lasso
 from sklearn.ensemble import RandomForestRegressor
 from scipy.stats import rankdata
 
@@ -37,6 +37,7 @@ from sklearn.model_selection import train_test_split
 import scipy
 import scipy.cluster.hierarchy as sch
 from sklearn.decomposition import PCA
+from sklearn.model_selection import KFold
 
 import nltk
 nltk.download('stopwords')
@@ -128,6 +129,37 @@ class MLP:
             prediction.append(y_pred.cpu().detach().flatten())
         prediction = np.concatenate(prediction)
         return prediction
+
+
+class StableLinReg:
+    def __init__(self, k_folds: int = 5, positive: bool = False, weighted: bool = False):
+        self.k_folds = k_folds
+        self.positive = positive
+        self.models = []
+        self.weighted = weighted
+        self.weights = np.zeros(k_folds)
+        
+    def fit(self, X, y):
+        kfolds = KFold(n_splits=self.k_folds, shuffle=False)
+        for i, (train_index, val_index) in enumerate(kfolds.split(X)):
+            X_train, y_train = X[train_index], y[train_index]
+            X_val, y_val = X[val_index], y[val_index]
+            model = Ridge(alpha=1, positive=self.positive)
+            model.fit(X_train, y_train)
+            self.models.append(model)     
+            self.weights[i] = get_prr(model.predict(X_val), 1 - y_val)
+        self.weights /= np.abs(self.weights).sum()
+        print("weights:", self.weights)
+                
+    def predict(self, X):
+        predictions = []
+        for model in self.models:
+            predictions.append(model.predict(X))
+        if self.weighted:
+            predictions = np.array(predictions).T @ self.weights
+        else:
+            predictions = np.mean(predictions, axis=0)
+        return predictions
     
 class LinRegTokenMahalanobisDistance(Estimator):
     def __init__(
@@ -231,7 +263,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
 
             train_mds = []
             dev_size = 0.5 
-            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, shuffle=True, random_state=42)
             lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
             tokens_before = np.cumsum(lens)
             token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
@@ -312,8 +344,15 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 train_mds.append(mean_md)
             train_dists = np.array(train_mds).T
             train_dists[np.isnan(train_dists)] = 0
+            np.save("./workdir/train_dists.npy", train_dists)
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
+            elif self.meta_model == "Lasso":
+                self.regressor = Lasso()
+            elif self.meta_model == "StableLinReg":
+                self.regressor = StableLinReg()
+            elif self.meta_model == "WeightedStableLinReg":
+                self.regressor = StableLinReg(weighted=True)
             elif self.meta_model == "MLP":                
                 self.regressor = MLP(n_features=train_dists.shape[1])
             elif self.meta_model == "weights":
@@ -331,8 +370,8 @@ class LinRegTokenMahalanobisDistance(Estimator):
             if self.norm == "orig":
                 X = train_dists
             elif self.norm == "scaler":
-                scaler = StandardScaler()
-                X = scaler.fit_transform(train_dists)
+                self.scaler = StandardScaler()
+                X = self.scaler.fit_transform(train_dists)
 
             if self.remove_corr:
                 feats = np.arange(X.shape[1])
@@ -385,7 +424,8 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 y = 1 - rankdata(target)
             else:
                 y = 1 - target
-            
+
+            np.save("./workdir/train_targets.npy", y)
             if self.meta_model != "weights":
                 self.regressor.fit(X, y)
                 self.y_preds = self.regressor.predict(X)
@@ -405,7 +445,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
         eval_dists = np.array(eval_mds).T
         eval_dists[np.isnan(eval_dists)] = 0
         if self.norm == "scaler":
-            eval_dists = scaler.transform(eval_dists)
+            eval_dists = self.scaler.transform(eval_dists)
             
         if self.meta_model != "weights":
             if self.remove_corr and (self.remove_alg < 3):
@@ -620,7 +660,8 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
                     if covariance_key_ not in stats.keys():
                         stats[covariance_key_] = self.tmds[layer].sigma_inv
 
-                self.tmds[layer].is_fitted = False
+                # self.tmds[layer].is_fitted = False
+                self.tmds[layer].is_fitted = True
                 train_mds.append(md)
             train_dists = np.array(train_mds).T
             tmd_scores = []
@@ -660,7 +701,7 @@ class LinRegTokenMahalanobisDistance_Claim(Estimator):
             if self.norm == "orig":
                 X = train_dists
             elif self.norm == "scaler":
-                scaler = StandardScaler()
+                self.scaler = StandardScaler()
                 X = scaler.fit_transform(train_dists)
 
             if self.remove_corr:

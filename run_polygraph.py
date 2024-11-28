@@ -45,6 +45,7 @@ from saplma_meta import SAPLMA_meta
 from factoscope import LLMFactoscope, LLMFactoscopeAll
 from eigenscore import EigenScore
 from huq_msp_lrtmd import HUQ_LRTMD, HUQ_LRTMD_Claim
+from SATRMD import StableTokenMahalanobisDistance
 
 from alignscore import AlignScore as AlignScoreNew
 
@@ -123,6 +124,44 @@ def main(args):
             **cache_kwargs
         )
 
+        if args.subsample_eval_dataset != -1:
+            dataset.subsample(args.subsample_eval_dataset, seed=seed)
+
+        if getattr(args, "eval_dataset_1", False):
+            k_ds = 1
+            while getattr(args, f"eval_dataset_{k_ds}", False):
+                eval_dataset_k = Dataset.load(
+                    getattr(args, f"eval_dataset_{k_ds}"),
+                    getattr(args, f"eval_text_column_{k_ds}"),
+                    getattr(args, f"eval_label_column_{k_ds}"),
+                    batch_size=args.batch_size,
+                    prompt=codecs.decode(getattr(args, f"eval_prompt_{k_ds}"), 'unicode_escape'),
+                    description=codecs.decode(getattr(args, f"eval_description_{k_ds}", ""), 'unicode_escape'),
+                    mmlu_max_subject_size=getattr(args, "mmlu_max_subject_size", 100),
+                    n_shot=getattr(args, f"eval_n_shot_{k_ds}", 5),
+                    few_shot_split=getattr(args, f"eval_few_shot_split_{k_ds}", "train"),
+                    split=getattr(args, f"eval_split_{k_ds}", "train"),
+                    max_new_tokens=getattr(args, f"eval_max_new_tokens_{k_ds}", 100),
+                    size=10_000,
+                    load_from_disk=args.load_from_disk,
+                    **cache_kwargs
+                )
+                k_ds += 1
+                if args.subsample_eval_dataset != -1:
+                    eval_dataset_k.subsample(args.subsample_eval_dataset, seed=seed)
+
+                if getattr(args, "multiref", False):
+                    if isinstance(eval_dataset_k.y[0], list):
+                        dataset.concat(eval_dataset_k.x, eval_dataset_k.y, eval_dataset_k.max_new_tokens)
+                    else:
+                        dataset.concat(eval_dataset_k.x, [[y] for y in eval_dataset_k.y], eval_dataset_k.max_new_tokens)
+                else:
+                    if isinstance(eval_dataset_k.y[0], list):
+                        dataset.concat(eval_dataset_k.x, eval_dataset_k.y[0], eval_dataset_k.max_new_tokens)
+                    else:
+                        dataset.concat(eval_dataset_k.x, eval_dataset_k.y, eval_dataset_k.max_new_tokens)
+                
+
         estimators = []
         estimators += get_ue_methods(args, model)
         density_based_ue_methods = get_density_based_ue_methods(args, model.model_type)
@@ -176,7 +215,7 @@ def main(args):
                 )
             if args.subsample_train_dataset != -1:
                 train_dataset.subsample(args.subsample_train_dataset, seed=seed)
-                
+            
             if getattr(args, "train_dataset_1", False):
 
                 k_ds = 1
@@ -202,7 +241,6 @@ def main(args):
                     if args.subsample_train_dataset != -1:
                         train_dataset_k.subsample(args.subsample_train_dataset, seed=seed)
                     
-                        
                     if train_dataset is None:
                         train_dataset = train_dataset_k
                     else:
@@ -225,11 +263,7 @@ def main(args):
                     args.subsample_background_train_dataset, seed=seed
                 )            
 
-        if args.subsample_eval_dataset != -1:
-            dataset.subsample(args.subsample_eval_dataset, seed=seed)
-
         log.info("Done with loading data.")
-
         generation_metrics = get_generation_metrics(args)
         ue_metrics = get_ue_metrics(args)
         
@@ -398,7 +432,7 @@ def get_density_based_ue_methods(args, model_type):
                 #layer-wise methods
                 for layer in layers:
                     for metric, metric_name in zip(metrics, metrics_names):
-                        estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
+                        # estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                         for thr in metric_thrs:
                             estimators += [TokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu")),
                                            RelativeTokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu"))]
@@ -408,8 +442,9 @@ def get_density_based_ue_methods(args, model_type):
                     # estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device="cuda", cv_hp=True)]
                     for thr in metric_thrs:
                         estimators += [
-                                    LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
+                                    # LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
                                     
+                                    ####################### satrmd
                                     LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
                                                                     metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
                                                                     aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
@@ -419,7 +454,101 @@ def get_density_based_ue_methods(args, model_type):
                                                                     metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
                                                                     aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
                                                                     ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    ####################### satrmd
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=False, meta_model="Lasso", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=False, meta_model="Lasso", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
 
+
+                                    ####################### weighted satrmd
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=False, meta_model="weights", norm="scaler", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=False, meta_model="weights", norm="scaler", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    
+                                    
+                                    ####################### nonzero stable satrmd by prr
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=True, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=True, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    ####################### stable satrmd by prr
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=False, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=False, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    ####################### nonzero stable satrmd+msp by prr
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=True, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu"), add_msp=True),
+                                    
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=True, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu"), add_msp=True),
+                                    
+                                    ####################### stable satrmd+msp by prr
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=False, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu"), add_msp=True),
+                                    
+                                    StableTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=False, meta_model="weights", norm="orig", remove_corr=False, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu"), add_msp=True),
+
+                                    ####################### linregstable satrmd by prr
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=False, meta_model="StableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=False, meta_model="StableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+
+                                    ####################### weighted linregstable satrmd by prr
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="TokenMahalanobis", positive=False, meta_model="WeightedStableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 
+                                                                    metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                    aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                    ue="RelativeTokenMahalanobis", positive=False, meta_model="WeightedStableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+
+
+
+                                    ####################### linregs satrmd+msp by prr
                                     LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
                                                                             metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
                                                                             aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
@@ -429,6 +558,40 @@ def get_density_based_ue_methods(args, model_type):
                                                                             metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
                                                                             aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
                                                                             ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    ####################### linregs satrmd+msp by prr
+                                    LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                            metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                            aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                            ue="TokenMahalanobis", positive=False, meta_model="Lasso", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                            metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                            aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                            ue="RelativeTokenMahalanobis", positive=False, meta_model="Lasso", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+
+                                    ####################### linregstable satrmd+msp by prr
+                                    LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                            metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                            aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                            ue="TokenMahalanobis", positive=False, meta_model="StableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                            metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                            aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                            ue="RelativeTokenMahalanobis", positive=False, meta_model="StableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+
+
+                                    ####################### weighted linregstable satrmd+msp by prr
+                                    LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                            metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                            aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                            ue="TokenMahalanobis", positive=False, meta_model="WeightedStableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
+                                    LinRegTokenMahalanobisDistance_Hybrid("decoder", parameters_path=None, 
+                                                                            metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name,
+                                                                            aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
+                                                                            ue="RelativeTokenMahalanobis", positive=False, meta_model="WeightedStableLinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
+                                    
                                     
                                     HUQ_LRTMD("decoder", parameters_path=None, 
                                                 metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name, 
@@ -439,7 +602,8 @@ def get_density_based_ue_methods(args, model_type):
                                                 metric=metric, metric_name=metric_name, metric_md=metric, metric_md_name=metric_name, 
                                                 aggregated=getattr(args, "multiref", False), hidden_layers=layers, metric_thr=thr,
                                                 ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu")),
-                                    ]
+                                    
+                        ]
         
     return estimators
 

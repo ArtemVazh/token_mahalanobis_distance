@@ -26,7 +26,9 @@ from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from relative_token_mahalanobis_distance import RelativeTokenMahalanobisDistance, RelativeTokenMahalanobisDistanceClaim
-from sklearn.linear_model import Ridge, RidgeCV
+from average_token_mahalanobis_distance import StableLinReg
+
+from sklearn.linear_model import Ridge, RidgeCV, Lasso
 from sklearn.ensemble import RandomForestRegressor
 from scipy.stats import rankdata
 from sklearn.model_selection import train_test_split
@@ -306,11 +308,12 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
 
             train_mds = []
             dev_size = 0.5 
-            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, shuffle=True, random_state=42)
             lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
             tokens_before = np.cumsum(lens)
             token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
             token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
+            print("Mean score for train/dev: ", np.mean(self.train_seq_metrics[train_idx]), np.mean(self.train_seq_metrics[dev_idx]))
                 
             for layer in tqdm(self.hidden_layers):
                 if layer == -1:
@@ -389,6 +392,12 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
             train_dists[np.isnan(train_dists)] = 0
             if self.meta_model == "LinReg":
                 self.regressor = Ridge(positive=self.positive)
+            elif self.meta_model == "Lasso":
+                self.regressor = Lasso()
+            elif self.meta_model == "StableLinReg":
+                self.regressor = StableLinReg()
+            elif self.meta_model == "WeightedStableLinReg":
+                self.regressor = StableLinReg(weighted=True)
             elif self.meta_model == "MLP":                
                 self.regressor = MLP(n_features=train_dists.shape[1])
             elif self.meta_model == "weights":
@@ -671,7 +680,7 @@ class LinRegTokenMahalanobisDistance_Hybrid_Claim(Estimator):
             
             train_mds = []
             dev_size = 0.5 
-            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42)
+            train_idx, dev_idx = train_test_split(list(range(len(train_greedy_texts))), test_size=dev_size, random_state=42, shuffle=False)
             lens = np.array([0]+[len(tokens) for tokens in train_greedy_tokens])
             tokens_before = np.cumsum(lens)
             token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx]).astype(int)
