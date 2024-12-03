@@ -130,6 +130,9 @@ def main(args):
         if getattr(args, "eval_dataset_1", False):
             k_ds = 1
             while getattr(args, f"eval_dataset_{k_ds}", False):
+                if getattr(args, f"eval_dataset_{k_ds}") == getattr(args, f"dataset"):
+                    k_ds += 1
+                    continue
                 eval_dataset_k = Dataset.load(
                     getattr(args, f"eval_dataset_{k_ds}"),
                     getattr(args, f"eval_text_column_{k_ds}"),
@@ -146,7 +149,6 @@ def main(args):
                     load_from_disk=args.load_from_disk,
                     **cache_kwargs
                 )
-                k_ds += 1
                 if args.subsample_eval_dataset != -1:
                     eval_dataset_k.subsample(args.subsample_eval_dataset, seed=seed)
 
@@ -160,6 +162,7 @@ def main(args):
                         dataset.concat(eval_dataset_k.x, eval_dataset_k.y[0], eval_dataset_k.max_new_tokens)
                     else:
                         dataset.concat(eval_dataset_k.x, eval_dataset_k.y, eval_dataset_k.max_new_tokens)
+                k_ds += 1
                 
 
         estimators = []
