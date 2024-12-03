@@ -32,12 +32,15 @@ class TokenMahalanobisDistance(Estimator):
         aggregated: bool = False,
         device: str = "cuda",
         storage_device: str = "cuda",
+        is_proxy_model: bool = False,
     ):
         self.hidden_layer = hidden_layer
+        self.is_proxy_model = is_proxy_model
+        self.proxy = "proxy_" if self.is_proxy_model else ""
         if self.hidden_layer == -1:
-            super().__init__(["token_embeddings", "train_token_embeddings", "train_greedy_tokens", "train_target_texts"], "sequence")
+            super().__init__([f"{self.proxy}token_embeddings", f"train_{self.proxy}token_embeddings", "train_greedy_tokens", "train_target_texts"], "sequence")
         else:
-            super().__init__([f"token_embeddings_{self.hidden_layer}", f"train_token_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "sequence")
+            super().__init__([f"{self.proxy}token_embeddings_{self.hidden_layer}", f"train_{self.proxy}token_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "sequence")
         self.centroid = None
         self.sigma_inv = None
         self.parameters_path = parameters_path
@@ -70,7 +73,7 @@ class TokenMahalanobisDistance(Estimator):
 
     def __str__(self):
         hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
-        return f"TokenMahalanobisDistance_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
+        return f"TokenMahalanobisDistance_{self.proxy}{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
 
     def __call__(self, stats: Dict[str, np.ndarray], save_data: bool = True) -> np.ndarray:
         # take the embeddings
@@ -79,7 +82,7 @@ class TokenMahalanobisDistance(Estimator):
         else:
             hidden_layer = f"_{self.hidden_layer}"
         embeddings = create_cuda_tensor_from_numpy(
-            stats[f"token_embeddings_{self.embeddings_type}{hidden_layer}"]
+            stats[f"{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
         )
         
         # compute centroids if not given
@@ -94,7 +97,7 @@ class TokenMahalanobisDistance(Estimator):
                     self.centroid = self.centroid.cuda()
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
-                    stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                    stats[f"train_{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
                 if self.metric_thr > 0:
                     train_greedy_tokens = stats[f"train_greedy_tokens"]
@@ -140,7 +143,7 @@ class TokenMahalanobisDistance(Estimator):
                     self.sigma_inv = self.sigma_inv.cuda()
             else:
                 train_embeddings = create_cuda_tensor_from_numpy(
-                    stats[f"train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                    stats[f"train_{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
 
                 if self.metric_thr > 0:
