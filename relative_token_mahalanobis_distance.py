@@ -25,6 +25,16 @@ def load_array(filename):
     return array
 
 
+NAMING_MAP = {"bert-base-uncased": "bert_base", 
+              "bert-large-uncased": "bert_large", 
+              "google/electra-small-discriminator": "electra_base", 
+              "roberta-base": "roberta_base", 
+              "roberta-large": "roberta_large",
+              "meta-llama/Llama-3.2-1B": "llama1b", 
+              "meta-llama/Llama-3.2-3B": "llama3b", 
+              "meta-llama/Llama-3.1-8B": "llama8b"}
+
+
 class RelativeTokenMahalanobisDistance(Estimator):
     """
     Ren et al. (2023) showed that it might be useful to adjust the Mahalanobis distance score by subtracting
@@ -45,12 +55,17 @@ class RelativeTokenMahalanobisDistance(Estimator):
         hidden_layer: int = -1,
         device: str = "cuda",
         storage_device: str = "cuda",
+        is_proxy_model: bool = False,
+        proxy_model_name: str = "bert-base-uncased",
     ):
         self.hidden_layer = hidden_layer
+        self.is_proxy_model = is_proxy_model
+        self.proxy = f"proxy_{NAMING_MAP[proxy_model_name]}_" if self.is_proxy_model else ""
+        train_greedy_tokens = f"train_{self.proxy}tokens" if self.is_proxy_model else f"train_greedy_tokens"
         if self.hidden_layer == -1:
-            super().__init__(["token_embeddings", "train_token_embeddings", "background_train_embeddings", "train_greedy_tokens", "train_target_texts"], "sequence")
+            super().__init__([f"{self.proxy}token_embeddings", f"train_{self.proxy}token_embeddings", f"background_train_{self.proxy}token_embeddings", train_greedy_tokens, "train_target_texts"], "sequence")
         else:
-            super().__init__([f"token_embeddings_{self.hidden_layer}", f"train_token_embeddings_{self.hidden_layer}", f"background_train_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "sequence")
+            super().__init__([f"{self.proxy}token_embeddings_{self.hidden_layer}", f"train_{self.proxy}token_embeddings_{self.hidden_layer}", f"background_train_{self.proxy}token_embeddings_{self.hidden_layer}", train_greedy_tokens, "train_target_texts"], "sequence")
         self.centroid_0 = None
         self.sigma_inv_0 = None
         self.parameters_path = parameters_path
@@ -60,7 +75,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
         self.max = -1e100
         self.metric_name = metric_name
         self.MD = TokenMahalanobisDistance(
-            embeddings_type, parameters_path, normalize=False, metric_thr=metric_thr, metric=metric, metric_name=metric_name, aggregation="none", hidden_layer=self.hidden_layer, aggregated=aggregated, device=device, storage_device=storage_device,
+            embeddings_type, parameters_path, normalize=False, metric_thr=metric_thr, metric=metric, metric_name=metric_name, aggregation="none", hidden_layer=self.hidden_layer, aggregated=aggregated, device=device, storage_device=storage_device, is_proxy_model=is_proxy_model, proxy_model_name=proxy_model_name
         )
         self.is_fitted = False
         self.metric_thr = metric_thr
@@ -81,7 +96,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
 
     def __str__(self):
         hidden_layer = "" if self.hidden_layer==-1 else f"_{self.hidden_layer}"
-        return f"RelativeTokenMahalanobisDistance_{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
+        return f"RelativeTokenMahalanobisDistance_{self.proxy}{self.embeddings_type}{hidden_layer} ({self.aggregation}, {self.metric_name}, {self.metric_thr})"
 
     def __call__(self, stats: Dict[str, np.ndarray], save_data: bool = True) -> np.ndarray:
         # take the embeddings
@@ -90,7 +105,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
         else:
             hidden_layer = f"_{self.hidden_layer}"
         embeddings = create_cuda_tensor_from_numpy(
-            stats[f"token_embeddings_{self.embeddings_type}{hidden_layer}"]
+            stats[f"{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
         )
 
         # since we want to adjust resulting reasure on baseline MD on train part
@@ -99,7 +114,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
 
         if not self.is_fitted:
             train_greedy_texts = stats[f"train_greedy_texts"]
-            centroid_key = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            centroid_key = f"background_{self.proxy}centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
             if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.centroid_0 = stats[centroid_key]
                 if self.storage_device == "cpu":
@@ -108,7 +123,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
                     self.centroid_0 = self.centroid_0.cuda()
             else:
                 background_train_embeddings = create_cuda_tensor_from_numpy(
-                    stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                    stats[f"background_train_{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
                 self.centroid_0 = background_train_embeddings.mean(axis=0)
                 
@@ -121,7 +136,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
                     stats[centroid_key] = self.centroid_0
 
         if not self.is_fitted:
-            covariance_key = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            covariance_key = f"background_{self.proxy}covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
             if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.sigma_inv_0 = stats[covariance_key]
                 if self.storage_device == "cpu":
@@ -130,7 +145,7 @@ class RelativeTokenMahalanobisDistance(Estimator):
                     self.sigma_inv_0 = self.sigma_inv_0.cuda()
             else:
                 background_train_embeddings = create_cuda_tensor_from_numpy(
-                    stats[f"background_train_token_embeddings_{self.embeddings_type}{hidden_layer}"]
+                    stats[f"background_train_{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
                 self.sigma_inv_0, _ = compute_inv_covariance(
                     self.centroid_0.unsqueeze(0), background_train_embeddings
@@ -198,7 +213,8 @@ class RelativeTokenMahalanobisDistance(Estimator):
         
         agg_dists = []
         k = 0
-        for tokens in stats["greedy_tokens"]:
+        greedy_tokens = stats[f"{self.proxy}tokens"] if self.is_proxy_model else stats[f"greedy_tokens"]
+        for tokens in greedy_tokens:
             dists_i = dists[k:k+len(tokens)]
             k += len(tokens)
             if self.aggregation == "mean":

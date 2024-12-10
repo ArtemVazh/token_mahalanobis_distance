@@ -18,6 +18,16 @@ from lm_polygraph.estimators.mahalanobis_distance import (
 from lm_polygraph.generation_metrics.openai_fact_check import OpenAIFactCheck
 
 
+NAMING_MAP = {"bert-base-uncased": "bert_base", 
+              "bert-large-uncased": "bert_large", 
+              "google/electra-small-discriminator": "electra_base", 
+              "roberta-base": "roberta_base", 
+              "roberta-large": "roberta_large",
+              "meta-llama/Llama-3.2-1B": "llama1b", 
+              "meta-llama/Llama-3.2-3B": "llama3b", 
+              "meta-llama/Llama-3.1-8B": "llama8b"}
+
+
 class TokenMahalanobisDistance(Estimator):
     def __init__(
         self,
@@ -33,14 +43,16 @@ class TokenMahalanobisDistance(Estimator):
         device: str = "cuda",
         storage_device: str = "cuda",
         is_proxy_model: bool = False,
+        proxy_model_name: str = "bert-base-uncased",
     ):
         self.hidden_layer = hidden_layer
         self.is_proxy_model = is_proxy_model
-        self.proxy = "proxy_" if self.is_proxy_model else ""
+        self.proxy = f"proxy_{NAMING_MAP[proxy_model_name]}_" if self.is_proxy_model else ""
+        train_greedy_tokens = f"train_{self.proxy}tokens" if self.is_proxy_model else f"train_greedy_tokens"
         if self.hidden_layer == -1:
-            super().__init__([f"{self.proxy}token_embeddings", f"train_{self.proxy}token_embeddings", "train_greedy_tokens", "train_target_texts"], "sequence")
+            super().__init__([f"{self.proxy}token_embeddings", f"train_{self.proxy}token_embeddings", train_greedy_tokens, "train_target_texts"], "sequence")
         else:
-            super().__init__([f"{self.proxy}token_embeddings_{self.hidden_layer}", f"train_{self.proxy}token_embeddings_{self.hidden_layer}", "train_greedy_tokens", "train_target_texts"], "sequence")
+            super().__init__([f"{self.proxy}token_embeddings_{self.hidden_layer}", f"train_{self.proxy}token_embeddings_{self.hidden_layer}", train_greedy_tokens, "train_target_texts"], "sequence")
         self.centroid = None
         self.sigma_inv = None
         self.parameters_path = parameters_path
@@ -83,12 +95,11 @@ class TokenMahalanobisDistance(Estimator):
             hidden_layer = f"_{self.hidden_layer}"
         embeddings = create_cuda_tensor_from_numpy(
             stats[f"{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
-        )
-        
+        )        
         # compute centroids if not given
         if not self.is_fitted:
             train_greedy_texts = stats[f"train_greedy_texts"]
-            centroid_key = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            centroid_key = f"{self.proxy}centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
             if (centroid_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.centroid = stats[centroid_key]
                 if self.storage_device == "cpu":
@@ -100,10 +111,10 @@ class TokenMahalanobisDistance(Estimator):
                     stats[f"train_{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
                 if self.metric_thr > 0:
-                    train_greedy_tokens = stats[f"train_greedy_tokens"]
+                    train_greedy_tokens = stats[f"train_{self.proxy}tokens"] if self.is_proxy_model else stats[f"train_greedy_tokens"]
                     train_target_texts = stats[f"train_target_texts"]
                     
-                    metric_key = f"train_{self.metric_name}_{len(train_greedy_texts)}"
+                    metric_key = f"train_{self.proxy}{self.metric_name}_{len(train_greedy_texts)}"
                     if metric_key in stats.keys():
                         self.train_token_metrics = stats[metric_key]
                     else:
@@ -115,7 +126,7 @@ class TokenMahalanobisDistance(Estimator):
                                 y_ = [y]
                             else:
                                 y_ = y
-                            metrics.append([self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0]] * len(x_t))
+                            metrics.append([self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_])[0]] * len(x_t))
                             
                         self.train_token_metrics = np.concatenate(metrics)
                         stats[metric_key] = self.train_token_metrics
@@ -134,7 +145,7 @@ class TokenMahalanobisDistance(Estimator):
 
         # compute inverse covariance matrix if not given
         if not self.is_fitted:
-            covariance_key = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
+            covariance_key = f"{self.proxy}covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_greedy_texts)}"
             if (covariance_key in stats.keys()): # to reduce number of stored centroid for multiple methods used the same data
                 self.sigma_inv = stats[covariance_key]
                 if self.storage_device == "cpu":
@@ -145,7 +156,6 @@ class TokenMahalanobisDistance(Estimator):
                 train_embeddings = create_cuda_tensor_from_numpy(
                     stats[f"train_{self.proxy}token_embeddings_{self.embeddings_type}{hidden_layer}"]
                 )
-
                 if self.metric_thr > 0:
                     if (self.train_token_metrics >= self.metric_thr).sum() > 10:
                         train_embeddings = train_embeddings[self.train_token_metrics >= self.metric_thr]
@@ -191,7 +201,9 @@ class TokenMahalanobisDistance(Estimator):
         
         k = 0
         agg_dists = []
-        for tokens in stats["greedy_tokens"]:
+        greedy_tokens = stats[f"{self.proxy}tokens"] if self.is_proxy_model else stats[f"greedy_tokens"]
+        
+        for tokens in greedy_tokens:
             dists_i = dists[k:k+len(tokens)].cpu().detach().numpy()
             k += len(tokens)
             if self.aggregation == "mean":
