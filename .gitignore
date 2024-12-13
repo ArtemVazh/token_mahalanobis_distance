@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 **/*log*
 workdir
+test_trainer
 
 # C extensions
 *.so

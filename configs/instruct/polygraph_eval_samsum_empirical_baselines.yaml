@@ -1,0 +1,26 @@
+defaults:
+  - polygraph_eval_samsum_default_instruct
+  - top1_processing
+  - _self_
+
+experiment_name: samsum_empirical_baselines
+
+prompt: "Provide the summary for the following dialogue. Give ONLY the summary. \n\nText:\n{text}\n\nSummary (one sentence):\n"
+max_new_tokens: 128
+generation_params:
+  generate_until:
+    - "\n"
+
+use_seq_ue: true
+include_whitebox_ue: false
+additional_estimators: 
+  - module: lm_polygraph.estimators.semantic_entropy
+    class_name: SemanticEntropy
+    kwargs:
+      class_probability_estimation: frequency
+  - module: lm_polygraph.estimators.p_true_empirical
+    class_name: PTrueEmpirical
+    kwargs: {}
+  - module: lm_polygraph.estimators.label_prob
+    class_name: LabelProb
+    kwargs: {}

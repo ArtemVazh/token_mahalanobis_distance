@@ -6,8 +6,8 @@ defaults:
 experiment_name: coqa_empirical_baselines
 
 description: "Here's a short story:\n\n{story} (End of story)\n\nProvide your best guess for the following question. Give ONLY the guess, no other words or explanation.\n\nFor example:\n\nGuess: <most likely guess, as short as possible; not a complete sentence, just the guess!>"
-prompt: "Question: {question}\nGuess: {answer}"
-# prompt: "Question: {question}\n"
+few_shot_prompt: "\n\nQuestion: {question}\nGuess: {answer}"
+prompt: "\n\nQuestion: {question}\n"
 max_new_tokens: 30
 generation_params:
   generate_until:

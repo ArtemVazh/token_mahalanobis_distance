@@ -33,8 +33,10 @@ from lm_polygraph.estimators import *
 from lm_polygraph.estimators.ensemble_token_measures import all_token_estimators
 from lm_polygraph.estimators.ensemble_sequence_measures import all_ep_estimators, all_pe_estimators
 from lm_polygraph.estimators.ensemble_token_measures import *
+from lm_polygraph.generation_metrics import *
 from lm_polygraph.ue_metrics import *
 from transformers import AutoConfig
+from lm_polygraph.utils.common import load_external_module
 
 from token_mahalanobis_distance import TokenMahalanobisDistance, TokenMahalanobisDistanceClaim
 from token_knn import TokenKNN
@@ -47,6 +49,7 @@ from factoscope import LLMFactoscope, LLMFactoscopeAll
 from eigenscore import EigenScore
 from huq_msp_lrtmd import HUQ_LRTMD, HUQ_LRTMD_Claim
 from SATRMD import StableTokenMahalanobisDistance
+from transformer_uq import TransformerUQ
 
 from alignscore import AlignScore as AlignScoreNew
 import nltk
@@ -194,6 +197,8 @@ def main(args):
             n_shot=getattr(args, "n_shot", 5),
             few_shot_split=getattr(args, "few_shot_split", "train"),
             split=args.eval_split,
+            instruct=getattr(args, "instruct", False),
+            few_shot_prompt=getattr(args, "few_shot_prompt", None),
             load_from_disk=args.load_from_disk,
             max_new_tokens=getattr(args, f"max_new_tokens", 100),
             **cache_kwargs
@@ -221,6 +226,8 @@ def main(args):
                     split=getattr(args, f"eval_split_{k_ds}", "train"),
                     max_new_tokens=getattr(args, f"eval_max_new_tokens_{k_ds}", 100),
                     size=10_000,
+                    instruct=getattr(args, "instruct", False),
+                    few_shot_prompt=getattr(args, "few_shot_prompt", None),
                     load_from_disk=args.load_from_disk,
                     **cache_kwargs
                 )
@@ -242,8 +249,8 @@ def main(args):
 
         estimators = []
         estimators += get_ue_methods(args, model)
-        density_based_ue_methods = get_density_based_ue_methods(args, model.model_type)
-        estimators += density_based_ue_methods
+        # density_based_ue_methods = get_density_based_ue_methods(args, model.model_type)
+        # estimators += density_based_ue_methods
 
         train_dataset = None
         background_train_dataset = None
@@ -263,6 +270,8 @@ def main(args):
                     few_shot_split=getattr(args, "few_shot_split", "train"),
                     split=args.train_split,
                     size=10_000,
+                    instruct=getattr(args, "instruct", False),
+                    few_shot_prompt=getattr(args, "few_shot_prompt", None),
                     load_from_disk=args.load_from_disk,
                     max_new_tokens=getattr(args, f"max_new_tokens", 100),
                     **cache_kwargs
@@ -287,6 +296,8 @@ def main(args):
                     few_shot_split=getattr(args, "few_shot_split", "train"),
                     split=args.train_split,
                     size=10_000,
+                    instruct=getattr(args, "instruct", False),
+                    few_shot_prompt=getattr(args, "few_shot_prompt", None),
                     load_from_disk=args.load_from_disk,
                     max_new_tokens=getattr(args, f"max_new_tokens", 100),
                     **cache_kwargs
@@ -312,6 +323,8 @@ def main(args):
                         split=getattr(args, f"train_split_{k_ds}", "train"),
                         max_new_tokens=getattr(args, f"max_new_tokens_{k_ds}", 100),
                         size=10_000,
+                        instruct=getattr(args, "instruct", False),
+                        few_shot_prompt=getattr(args, "few_shot_prompt", None),
                         load_from_disk=args.load_from_disk,
                         **cache_kwargs
                     )
@@ -333,6 +346,8 @@ def main(args):
                 data_files=args.background_train_dataset_data_files,
                 split="train",
                 size=100_000,
+                instruct=getattr(args, "instruct", False),
+                few_shot_prompt=getattr(args, "few_shot_prompt", None),
                 load_from_disk=args.background_load_from_disk,
                 **cache_kwargs
             )
@@ -433,7 +448,10 @@ def get_density_based_ue_methods(args, model_type):
         if getattr(args, "run_proposed_methods", False):
             if (args.task == "qa") and (args.dataset not in ["keivalya/MedQuad-MedicalQnADataset", "bigbio/pubmed_qa", ['truthful_qa', 'generation']]):
                 if getattr(args, "is_ood", False):
-                    alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
+                    if getattr(args, "mean_als", True):
+                        alignscorer = AlignScoreNew(return_mean=True, batch_size=1)
+                    else:
+                        alignscorer = AlignScoreNew(return_mean=False, batch_size=1)
                     metrics = [alignscorer]
                     metrics_names = ["AlignScore"]
                 else:
@@ -456,9 +474,9 @@ def get_density_based_ue_methods(args, model_type):
             parameters_path = f"{args.cache_path}/density_stats/{dataset_name}/{model_name}"
 
         
-        if getattr(args.model, "type", "Whitebox") == "Blackbox":       
-            proxy_models = ["google/electra-small-discriminator", "roberta-base",# "roberta-large", "bert-base-uncased", "bert-large-uncased", 
-                            "meta-llama/Llama-3.2-1B", "meta-llama/Llama-3.1-8B"] #, "meta-llama/Llama-3.2-3B"
+        if (getattr(args.model, "type", "Whitebox") == "Blackbox") or getattr(args, "use_proxy_model", False):       
+            proxy_models = ["google/electra-small-discriminator", "roberta-base", "roberta-large", 
+                            "meta-llama/Llama-3.2-1B", "meta-llama/Llama-3.2-3B"]
             for proxy_model in proxy_models:
                 cfg = AutoConfig.from_pretrained(proxy_model)
                 proxy_hidden_layers = list(range(cfg.num_hidden_layers-1)) + [-1]
@@ -471,6 +489,8 @@ def get_density_based_ue_methods(args, model_type):
                             ]
     
                 for metric, metric_name in zip(metrics, metrics_names):
+                    if proxy_model in ["roberta-base", "roberta-large"]:
+                        estimators += [TransformerUQ(model_name=proxy_model, metric=metric, metric_name=metric_name)]
                     for thr in metric_thrs:
                         for sim_pca in [True, False]:
                             estimators += [
@@ -505,7 +525,7 @@ def get_density_based_ue_methods(args, model_type):
                                 #             ue="RelativeTokenMahalanobis", positive=False, meta_model="LinReg", norm="orig", remove_corr=True, remove_alg=3, storage_device=getattr(args, "clean_md_device", "cpu"), is_proxy_model=True, proxy_model_name=proxy_model, sim_pca=sim_pca),
                             ]
         
-        elif model_type == "Seq2SeqLM":
+        if (getattr(args.model, "type", "Whitebox") != "Blackbox") and (model_type == "Seq2SeqLM"):
             estimators += [
                 MahalanobisDistanceSeq("encoder", parameters_path=parameters_path),
                 MahalanobisDistanceSeq("decoder", parameters_path=parameters_path),
@@ -522,7 +542,7 @@ def get_density_based_ue_methods(args, model_type):
                 PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path),
                 PPLMDSeq("decoder", md_type="RMD", parameters_path=parameters_path),
             ]
-        else:
+        elif getattr(args.model, "type", "Whitebox") != "Blackbox":
             if getattr(args, "run_baselines", False):
                 estimators += [
                     PPLMDSeq("decoder", md_type="MD", parameters_path=parameters_path, storage_device=getattr(args, "md_device", "cpu")),
@@ -1039,6 +1059,27 @@ def get_generation_metrics(args):
         if args.task == "nmt":
             ignore_regex = getattr(args, "source_ignore_regex", None)
             result += [Comet(source_ignore_regex = ignore_regex)]
+
+        process_output_fn = getattr(args, "process_output_fn", None)
+        process_target_fn = getattr(args, "process_target_fn", None)
+        if process_target_fn or process_output_fn:
+            if (getattr(args, "target_ignore_regex", None) or 
+                getattr(args, "output_ignore_regex", None) or
+                getattr(args, "normalize", False)):
+                raise ValueError("Specifying ignore_regex or normalize simultaneously with process scripts is not allowed.")
+    
+            def load_process_fn(fn_config):
+                if not fn_config:
+                    return None
+                path = get_abs_path_from_hydra_config(fn_config.path)
+                module = load_external_module(path)
+                return getattr(module, fn_config.fn_name)
+    
+            process_output_fn = load_process_fn(process_output_fn)
+            process_target_fn = load_process_fn(process_target_fn)
+    
+            result = [PreprocessOutputTarget(metric, process_output_fn, process_target_fn) for metric in result]
+        
         if not getattr(args, "multiref", False):
             pass
             # Currently, BartScoreSeqMetric does not support multiref
@@ -1065,6 +1106,13 @@ def get_model_kwargs(args):
         model_kwargs['attn_implementation'] = args.model.attn_implementation
 
     return model_kwargs
+
+def get_abs_path_from_hydra_config(path: str) -> Path:
+    path = Path(path)
+    if not os.path.isabs(path):
+        path = hydra_config.parent / path
+
+    return path
 
 
 if __name__ == "__main__":

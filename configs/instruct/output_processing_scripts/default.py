@@ -11,7 +11,6 @@ def normalize_text(text: str) -> str:
     text = text.translate(str.maketrans("", "", string.punctuation))
     return text
 
-
 def process_output_top1(output: str) -> str:
     output = TOP1_OUTPUT_IGNORE_REGEX.sub("", output)
     output = normalize_text(output)

@@ -44,7 +44,6 @@ class AlignScore(GenerationMetric):
         self,
         stats: Dict[str, np.ndarray],
         target_texts: List[str],
-        target_tokens: List[List[int]],
     ) -> np.ndarray:
         """
         Calculates AlignScore (https://aclanthology.org/2023.acl-long.634/) between
