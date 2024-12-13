@@ -249,8 +249,8 @@ def main(args):
 
         estimators = []
         estimators += get_ue_methods(args, model)
-        # density_based_ue_methods = get_density_based_ue_methods(args, model.model_type)
-        # estimators += density_based_ue_methods
+        density_based_ue_methods = get_density_based_ue_methods(args, model.model_type)
+        estimators += density_based_ue_methods
 
         train_dataset = None
         background_train_dataset = None
