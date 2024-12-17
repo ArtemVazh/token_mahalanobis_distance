@@ -463,7 +463,28 @@ def get_density_based_ue_methods(args, model_type):
                 metrics_names = ["AlignScore"]
     
         layers = getattr(args, "layers", [0, -1])
-        metric_thrs = getattr(args, "metric_thrs", [0.3])            
+        metric_thrs = getattr(args, "metric_thrs", [0.3])    
+
+        process_output_fn = getattr(args, "process_output_fn", None)
+        process_target_fn = getattr(args, "process_target_fn", None)
+        if process_target_fn or process_output_fn:
+            if (getattr(args, "target_ignore_regex", None) or 
+                getattr(args, "output_ignore_regex", None) or
+                getattr(args, "normalize", False)):
+                raise ValueError("Specifying ignore_regex or normalize simultaneously with process scripts is not allowed.")
+    
+            def load_process_fn(fn_config):
+                if not fn_config:
+                    return None
+                path = get_abs_path_from_hydra_config(fn_config.path)
+                module = load_external_module(path)
+                return getattr(module, fn_config.fn_name)
+    
+            process_output_fn = load_process_fn(process_output_fn)
+            process_target_fn = load_process_fn(process_target_fn)
+    
+            metrics = [PreprocessOutputTarget(metric, process_output_fn, process_target_fn) for metric in metrics]
+            print("PreprocessOutputTarget")
     
         if getattr(args, 'parameters_path', False):
             parameters_path = args.parameters_path
