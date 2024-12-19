@@ -744,7 +744,34 @@ class LLMFactoscopeAll(Estimator):
             train_loader = torch_data.DataLoader(train_dataset, batch_size=64, shuffle=True, pin_memory=True, sampler=None)
             self.support_loader = torch_data.DataLoader(support_dataset, batch_size=64, shuffle=False, pin_memory=True, sampler=None)
             dev_loader = torch_data.DataLoader(dev_dataset, batch_size=1, shuffle=False, pin_memory=True, sampler=None)
+            #################################################
+
+            act_model = ActTriNet(act_resnet_model).cuda()
+            actrank_model = ActRankTriNet(act_resnet_model, grunet_model, self.emb_dim).cuda()
+            actranktopkid_model = ActRankTopkIdTriNet(act_resnet_model, grunet_model, emb_dist_resnet_model, self.emb_dim).cuda()
+            combined_model = CombinedTriNet(act_resnet_model, grunet_model, emb_dist_resnet_model, prob_resnet_model, self.emb_dim).cuda()
+
+            # train the model
+            print('act:')
+            train_model(act_model, train_loader, dev_loader, self.support_loader, self.dim)
+            
+            print('rank:')
+            train_model(actrank_model, train_loader, dev_loader, self.support_loader, self.dim)
+            
+            actranktopkid_model = ActRankTopkIdTriNet(actrank_model.act, actrank_model.grunet, emb_dist_resnet_model, self.emb_dim).cuda()  
+    
+            print('topk id:')
+            train_model(actranktopkid_model, train_loader, dev_loader, self.support_loader, self.dim)
+    
+            combined_model = CombinedTriNet(actranktopkid_model.act, actranktopkid_model.grunet, actranktopkid_model.embdistance, prob_resnet_model, self.emb_dim).cuda()  
+            
+            print('topk prob:')
             self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, self.dim)
+
+            #################################################
+            # self.ue_predictor = train_model(combined_model, train_loader, dev_loader, self.support_loader, self.dim)
+            #################################################
+        
             self.support_set_labels, self.support_set_output = None, None
             self.is_fitted = True
             del train_dataset, dev_dataset
