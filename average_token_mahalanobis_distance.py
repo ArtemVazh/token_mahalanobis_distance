@@ -42,6 +42,15 @@ from sklearn.model_selection import KFold
 import nltk
 nltk.download('stopwords')
 
+NAMING_MAP = {"bert-base-uncased": "bert_base", 
+              "bert-large-uncased": "bert_large", 
+              "google/electra-small-discriminator": "electra_base", 
+              "roberta-base": "roberta_base", 
+              "roberta-large": "roberta_large",
+              "meta-llama/Llama-3.2-1B": "llama1b", 
+              "meta-llama/Llama-3.2-3B": "llama3b", 
+              "meta-llama/Llama-3.1-8B": "llama8b"}
+
 prr = PredictionRejectionArea()
 
 def get_prr(ue, metric):
@@ -189,29 +198,40 @@ class LinRegTokenMahalanobisDistance(Estimator):
 
         device: str = "cuda",
         storage_device: str = "cuda",
+
+        is_proxy_model: bool = False,
+        proxy_model_name: str = "bert-base-uncased",
+
+        sim_pca: bool = False,
+        
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
         self.device = device
         self.storage_device = storage_device
         self.tmds = {}
-        dependencies = ["train_greedy_tokens", "train_target_texts"]
+        self.is_proxy_model = is_proxy_model
+        self.proxy = f"proxy_{NAMING_MAP[proxy_model_name]}_" if self.is_proxy_model else ""
+        self.sim_pca = sim_pca
+        self.sim_pca_name = f", sim_pca" if self.sim_pca else ""
+        train_greedy_tokens = f"train_{self.proxy}tokens" if self.is_proxy_model else f"train_greedy_tokens"
+        dependencies = [train_greedy_tokens, "train_target_texts"]
         for layer in self.hidden_layers:
             if layer == -1:
-                dependencies += ["token_embeddings", "train_token_embeddings"]
+                dependencies += [f"{self.proxy}token_embeddings", f"train_{self.proxy}token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_train_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += [f"background_train_{self.proxy}token_embeddings"]
             else:
-                dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
+                dependencies += [f"{self.proxy}token_embeddings_{layer}", f"train_{self.proxy}token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_{self.proxy}token_embeddings_{layer}"]
             if ue == "TokenMahalanobis":
                 self.tmds[layer] = TokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device 
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device, is_proxy_model=is_proxy_model, proxy_model_name=proxy_model_name
                 )
             elif ue == "RelativeTokenMahalanobis":
                 self.tmds[layer] = RelativeTokenMahalanobisDistance(
-                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device
+                    embeddings_type, None, normalize=False, metric_thr=metric_thr, metric=metric_md, metric_name=metric_md_name, aggregation="none", hidden_layer=layer, aggregated=aggregated, device=self.device, storage_device=self.storage_device, is_proxy_model=is_proxy_model, proxy_model_name=proxy_model_name
                 )
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
@@ -238,14 +258,14 @@ class LinRegTokenMahalanobisDistance(Estimator):
         positive = "pos" if self.positive else ""
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
         remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
-        return f"{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
+        return f"{self.meta_model}{self.ue}Distance_{self.proxy}{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr}{self.sim_pca_name})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         if not self.is_fitted: 
             train_greedy_texts = stats[f"train_greedy_texts"]
-            train_greedy_tokens = stats[f"train_greedy_tokens"]
+            train_greedy_tokens = stats[f"train_{self.proxy}tokens"] if self.is_proxy_model else stats[f"train_greedy_tokens"]
             train_target_texts = stats[f"train_target_texts"]
-            metric_key = f"train_seq_{self.metric_name}_{len(train_greedy_texts)}"
+            metric_key = f"train_{self.proxy}seq_{self.metric_name}_{len(train_greedy_texts)}"
             if metric_key in stats.keys():
                 self.train_seq_metrics = stats[metric_key]
             else:   
@@ -257,7 +277,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
                         y_ = [y]
                     else:
                         y_ = y
-                    metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0])
+                    metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_])[0])
                 self.train_seq_metrics = np.array(metrics)
                 stats[metric_key] = self.train_seq_metrics
 
@@ -268,48 +288,54 @@ class LinRegTokenMahalanobisDistance(Estimator):
             tokens_before = np.cumsum(lens)
             token_train_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in train_idx])
             token_dev_idx = np.concatenate([np.arange(tokens_before[i], tokens_before[i+1]) for i in dev_idx])
-                            
+
+            centroids = []
             for layer in tqdm(self.hidden_layers):
                 if layer == -1:
-                    train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}"]
-                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
-                                   "train_greedy_texts":[train_greedy_texts[k] for k in train_idx],
-                                   "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                    train_token_embeddings = stats[f"train_{self.proxy}token_embeddings_{self.embeddings_type}"]
+                    train_stats = {f"train_{self.proxy}tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   f"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   f"train_greedy_texts":[train_greedy_texts[k] for k in train_idx],
+                                   f"{self.proxy}tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   f"greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_train_idx], #train_token_embeddings[token_train_idx],
-                                   f"token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_dev_idx], #train_token_embeddings[token_dev_idx],
+                                   f"train_{self.proxy}token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_train_idx], #train_token_embeddings[token_train_idx],
+                                   f"{self.proxy}token_embeddings_{self.embeddings_type}": [train_token_embeddings[k] for k in token_dev_idx], #train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}"]
+                        train_stats[f"background_train_{self.proxy}token_embeddings_{self.embeddings_type}"] = stats[f"background_train_{self.proxy}token_embeddings_{self.embeddings_type}"]
                 else:
-                    train_token_embeddings = stats[f"train_token_embeddings_{self.embeddings_type}_{layer}"]
-                    train_stats = {"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
+                    train_token_embeddings = stats[f"train_{self.proxy}token_embeddings_{self.embeddings_type}_{layer}"]
+                    train_stats = {f"train_{self.proxy}tokens": [train_greedy_tokens[k] for k in train_idx], 
+                                   f"train_greedy_tokens": [train_greedy_tokens[k] for k in train_idx], 
                                    "train_greedy_texts": [train_greedy_texts[k] for k in train_idx],
-                                   "greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   f"{self.proxy}tokens": [train_greedy_tokens[k] for k in dev_idx], 
+                                   f"greedy_tokens": [train_greedy_tokens[k] for k in dev_idx], 
                                    "train_target_texts": [train_target_texts[k] for k in train_idx],
-                                   f"train_token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_train_idx], #train_token_embeddings[token_train_idx],
-                                   f"token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_dev_idx], #train_token_embeddings[token_dev_idx],
+                                   f"train_{self.proxy}token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_train_idx], #train_token_embeddings[token_train_idx],
+                                   f"{self.proxy}token_embeddings_{self.embeddings_type}_{layer}": [train_token_embeddings[k] for k in token_dev_idx], #train_token_embeddings[token_dev_idx],
                                   }
                     if "relative" in self.ue.lower(): 
-                        train_stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_token_embeddings_{self.embeddings_type}_{layer}"]
+                        train_stats[f"background_train_{self.proxy}token_embeddings_{self.embeddings_type}_{layer}"] = stats[f"background_train_{self.proxy}token_embeddings_{self.embeddings_type}_{layer}"]
                     
-                metric_key = f"train_{self.metric_md_name}_{len(train_greedy_texts)}"
+                metric_key = f"{self.proxy}train_{self.metric_md_name}_{len(train_greedy_texts)}"
                 if metric_key in stats.keys():
-                    train_stats[f"train_{self.metric_md_name}_{len(train_idx)}"] = stats[metric_key][token_train_idx]
+                    train_stats[f"{self.proxy}train_{self.metric_md_name}_{len(train_idx)}"] = stats[metric_key][token_train_idx]
 
                 if layer == -1:
                     hidden_layer = ""
                 else:
                     hidden_layer = f"_{layer}"
             
-                centroid_key_ = f"centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
-                covariance_key_ = f"covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
+                centroid_key_ = f"{self.proxy}centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
+                covariance_key_ = f"{self.proxy}covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
 
-                background_centroid_key_ = f"background_centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
-                background_covariance_key_ = f"background_covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
+                background_centroid_key_ = f"background_{self.proxy}centroid{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
+                background_covariance_key_ = f"background_{self.proxy}covariance{hidden_layer}_{self.metric_name}_{self.metric_thr}_{len(train_idx)}"
 
                 if centroid_key_ in stats.keys():
                     train_stats[centroid_key_] = stats[centroid_key_]
+                    centroids.append(stats[centroid_key_].cpu().detach().numpy())
                 if covariance_key_ in stats.keys():
                     train_stats[covariance_key_] = stats[covariance_key_]
                 if background_centroid_key_ in stats.keys():
@@ -322,6 +348,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 if "Relative" in self.ue:
                     if centroid_key_ not in stats.keys():
                         stats[centroid_key_] = self.tmds[layer].MD.centroid
+                        centroids.append(stats[centroid_key_].cpu().detach().numpy())
                     if covariance_key_ not in stats.keys():
                         stats[covariance_key_] = self.tmds[layer].MD.sigma_inv  
                     if background_centroid_key_ not in stats.keys():
@@ -331,6 +358,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
                 else:
                     if centroid_key_ not in stats.keys():
                         stats[centroid_key_] = self.tmds[layer].centroid
+                        centroids.append(stats[centroid_key_].cpu().detach().numpy())
                     if covariance_key_ not in stats.keys():
                         stats[covariance_key_] = self.tmds[layer].sigma_inv
 
@@ -407,8 +435,20 @@ class LinRegTokenMahalanobisDistance(Estimator):
                     X = X[:, self.added]
 
                 if self.remove_alg == 3:
-                    self.pca = PCA(n_components=10)
-                    X = self.pca.fit_transform(X)
+                    if self.sim_pca:
+                        from sklearn.metrics.pairwise import cosine_similarity
+                        centroids = np.array(centroids)
+                        sim = cosine_similarity(centroids)
+
+                        self.L = np.linalg.cholesky(sim)
+                        self.scaler = StandardScaler()
+                        X = self.scaler.fit_transform(X)
+                        _, _, self.v = np.linalg.svd(X.dot(self.L), full_matrices=False)
+                        X = X @ self.L @ self.v.T[:, :10]
+                        
+                    else:
+                        self.pca = PCA(n_components=10)
+                        X = self.pca.fit_transform(X)
                     
                 if self.remove_alg == 4:
                     self.pca = PCA(n_components=X.shape[1])
@@ -433,11 +473,12 @@ class LinRegTokenMahalanobisDistance(Estimator):
 
 
         eval_mds = []
+        greedy_tokens = stats[f"{self.proxy}tokens"] if self.is_proxy_model else stats[f"greedy_tokens"]
         for layer in self.tmds.keys():
             md = self.tmds[layer](stats).reshape(-1)
             k = 0
             mean_md = []
-            for tokens in stats["greedy_tokens"]:
+            for tokens in greedy_tokens:
                 dists_i = md[k:k+len(tokens)]
                 k += len(tokens)
                 mean_md.append(np.mean(dists_i))
@@ -451,7 +492,11 @@ class LinRegTokenMahalanobisDistance(Estimator):
             if self.remove_corr and (self.remove_alg < 3):
                 eval_dists = eval_dists[:, self.added]
             elif self.remove_corr:
-                eval_dists = self.pca.transform(eval_dists)
+                if self.sim_pca:
+                    eval_dists = self.scaler.transform(eval_dists)
+                    eval_dists = eval_dists @ self.L @ self.v.T[:, :10]
+                else:
+                    eval_dists = self.pca.transform(eval_dists)
             ues = self.regressor.predict(eval_dists)
         else:
             ues = eval_dists @ self.weights

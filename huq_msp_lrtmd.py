@@ -44,6 +44,15 @@ from lm_polygraph.estimators.claim.claim_conditioned_probability import ClaimCon
 
 prr = PredictionRejectionArea()
 
+NAMING_MAP = {"bert-base-uncased": "bert_base", 
+              "bert-large-uncased": "bert_large", 
+              "google/electra-small-discriminator": "electra_base", 
+              "roberta-base": "roberta_base", 
+              "roberta-large": "roberta_large",
+              "meta-llama/Llama-3.2-1B": "llama1b", 
+              "meta-llama/Llama-3.2-3B": "llama3b", 
+              "meta-llama/Llama-3.1-8B": "llama8b"}
+
 def total_uncertainty_linear_step(
     epistemic, aleatoric, threshold_min=0.1, threshold_max=0.9, alpha=0.1
 ):
@@ -137,23 +146,37 @@ class HUQ_LRTMD(Estimator):
 
         device: str = "cuda",
         storage_device: str = "cuda",
+
+        is_proxy_model: bool = False,
+        proxy_model_name: str = "bert-base-uncased",
+
+        sim_pca: bool = False,
+        
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
         self.device = device
         self.storage_device = storage_device
         self.tmds = {}
-        dependencies = ["train_greedy_tokens", "train_target_texts"]
-        dependencies += ["attention_features", "train_attention_features", "train_greedy_log_likelihoods"]
+        self.is_proxy_model = is_proxy_model
+        self.proxy = f"proxy_{NAMING_MAP[proxy_model_name]}_" if self.is_proxy_model else ""
+        train_greedy_tokens = f"train_{self.proxy}tokens" if self.is_proxy_model else f"train_greedy_tokens"
+        
+        dependencies = [train_greedy_tokens, "train_target_texts"]
+        # dependencies += ["attention_features", "train_attention_features", "train_greedy_log_likelihoods"]
+        
+        self.sim_pca = sim_pca
+        self.sim_pca_name = f", sim_pca" if self.sim_pca else ""
+        train_greedy_tokens = f"train_{self.proxy}tokens" if self.is_proxy_model else f"train_greedy_tokens"
         for layer in self.hidden_layers:
             if layer == -1:
-                dependencies += ["token_embeddings", "train_token_embeddings"]
+                dependencies += [f"{self.proxy}token_embeddings", f"train_{self.proxy}token_embeddings"]
                 if "relative" in ue.lower():
-                    dependencies += ["background_train_token_embeddings", "background_train_token_embeddings", "background_train_embeddings"]
+                    dependencies += [f"background_train_{self.proxy}token_embeddings"]
             else:
-                dependencies += [f"token_embeddings_{layer}", f"train_token_embeddings_{layer}"]
+                dependencies += [f"{self.proxy}token_embeddings_{layer}", f"train_{self.proxy}token_embeddings_{layer}"]
                 if "relative" in ue.lower():
-                    dependencies += [f"background_train_token_embeddings_{layer}", f"background_train_embeddings_{layer}"]
+                    dependencies += [f"background_train_{self.proxy}token_embeddings_{layer}"]
         super().__init__(dependencies, "sequence")
         self.parameters_path=parameters_path
         self.is_fitted = False
@@ -176,7 +199,7 @@ class HUQ_LRTMD(Estimator):
                                                  metric_md=metric, metric_md_name=metric_name, aggregated=aggregated, 
                                                  hidden_layers=hidden_layers, metric_thr=metric_thr, aggregation=aggregation,
                                                  ue=ue, positive=positive, meta_model=meta_model, norm=norm, 
-                                                 remove_corr=remove_corr, remove_alg=remove_alg, device=device, storage_device=storage_device)
+                                                 remove_corr=remove_corr, remove_alg=remove_alg, device=device, storage_device=storage_device, is_proxy_model=is_proxy_model, proxy_model_name=proxy_model_name, sim_pca=sim_pca)
         self.msp = MaximumSequenceProbability()
         self.use_tad=use_tad
     
@@ -186,7 +209,7 @@ class HUQ_LRTMD(Estimator):
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
         remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
         use_tad = f"+tad" if self.use_tad else ""
-        return f"HUQ-{self.meta_model}{self.ue}Distance_{self.embeddings_type}{hidden_layers}{use_tad} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr})"
+        return f"HUQ-{self.meta_model}{self.ue}Distance_{self.proxy}{self.embeddings_type}{hidden_layers}{use_tad} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr}{self.sim_pca_name})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
         if not self.is_fitted: 

@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from datasets import load_dataset, Dataset as hf_dataset
 
-from typing import Iterable, Tuple, List
+from typing import Iterable, Tuple, List, Union, Optional
 from sklearn.model_selection import KFold
 
 
@@ -185,6 +185,8 @@ class Dataset:
         few_shot_split: str = "train",
         split: str = "test",
         size: int = None,
+        instruct: bool = False,
+        few_shot_prompt: Optional[str] = None,
         max_new_tokens: int = 100,
         **kwargs,
     ):
@@ -259,9 +261,25 @@ class Dataset:
                 for j, (question, answer) in enumerate(
                     zip(inst[x_column], inst[y_column]["input_text"])
                 ):
+                    if instruct:
+                        assert (
+                            few_shot_prompt is not None
+                        ), "separate few_shot_prompt must be provided for instruction mode."
+                        few_shot_section = doc_to_text(inst, few_shot_prompt, j)
+                        if few_shot_section != "":
+                            few_shot_section = (
+                                "\n\nHere are a few examples of questions and answers:"
+                                + few_shot_section
+                                + "\n\nNow answer the following question in the same format."
+                            )
+                        else:
+                            few_shot_section = "\n\n"
+                    else:
+                        few_shot_section = doc_to_text(inst, prompt, j)
+                        
                     formatted_prompt = (
                         formatted_description
-                        + doc_to_text(inst, prompt, j)
+                        + few_shot_section
                         + prompt.format(
                             question=question,
                             answer="",
@@ -309,17 +327,36 @@ class Dataset:
                         len(few_shot_subject), n_shot, replace=False
                     )
                     few_shot_data = few_shot_subject.select(few_shot_ids)
-                    
-                    formatted_few_shot_prompt = ""
-                    for inst in few_shot_data:
-                        formatted_few_shot_prompt += (
-                            prompt.format(
-                                choices=inst["choices"],
-                                question=inst["question"].strip(),
-                                answer=answers[inst["answer"]],
-                            )
-                            + "\n"
+                    if instruct:
+                        assert (
+                            few_shot_prompt is not None
+                        ), "separate few_shot_prompt must be provided for instruction mode."
+                        formatted_few_shot_prompt = (
+                            "Here are a few examples of questions and answers:\n\n"
                         )
+                        for inst in few_shot_data:
+                            formatted_few_shot_prompt += (
+                                few_shot_prompt.format(
+                                    choices=inst["choices"],
+                                    question=inst["question"].strip(),
+                                    answer=answers[inst["answer"]],
+                                )
+                                + "\n\n"
+                            )
+                        formatted_few_shot_prompt += (
+                            "Now answer the following question in the same format:\n\n"
+                        )
+                    else:
+                        formatted_few_shot_prompt = ""
+                        for inst in few_shot_data:
+                            formatted_few_shot_prompt += (
+                                prompt.format(
+                                    choices=inst["choices"],
+                                    question=inst["question"].strip(),
+                                    answer=answers[inst["answer"]],
+                                )
+                                + "\n"
+                            )
 
                 subject_data = dataset.select(
                     np.argwhere(subjects == subject).flatten()
@@ -354,14 +391,33 @@ class Dataset:
                     len(few_shot_dataset), n_shot, replace=False
                 )
                 few_shot_data = few_shot_dataset.select(few_shot_ids)
-                for inst in few_shot_data:
+                if instruct:
+                    assert (
+                        few_shot_prompt is not None
+                    ), "separate few_shot_prompt must be provided for instruction mode."
                     formatted_few_shot_prompt += (
-                        prompt.format(
-                            question=inst["question"].strip(),
-                            answer=inst["answer"]["normalized_value"],
-                        )
-                        + "\n"
+                        "\n\nHere are a few examples of questions and answers:\n\n"
                     )
+                    for inst in few_shot_data:
+                        formatted_few_shot_prompt += (
+                            few_shot_prompt.format(
+                                question=inst["question"].strip(),
+                                answer=inst["answer"]["normalized_value"],
+                            )
+                            + "\n\n"
+                        )
+                    formatted_few_shot_prompt += (
+                        "Now answer the following question in the same format:\n\n"
+                    )
+                else:
+                    for inst in few_shot_data:
+                        formatted_few_shot_prompt += (
+                            prompt.format(
+                                question=inst["question"].strip(),
+                                answer=inst["answer"]["normalized_value"],
+                            )
+                            + "\n"
+                        )
             for inst in dataset:
                 x.append(
                     formatted_few_shot_prompt
@@ -414,14 +470,34 @@ class Dataset:
                     len(few_shot_dataset), n_shot, replace=False
                 )
                 few_shot_data = few_shot_dataset.select(few_shot_ids)
-                for inst in few_shot_data:
+                if instruct:
+                    assert (
+                        few_shot_prompt is not None
+                    ), "separate few_shot_prompt must be provided for instruction mode."
                     formatted_few_shot_prompt += (
-                        prompt.format(
-                            question=inst[x_column].strip(),
-                            answer=inst[y_column],
-                        )
-                        + "\n"
+                        "\n\nHere are a few examples of questions and answers:\n\n"
                     )
+                    formatted_few_shot_prompt += description
+                    for inst in few_shot_data:
+                        formatted_few_shot_prompt += (
+                            prompt.format(
+                                question=inst[x_column].strip(),
+                                answer=inst[y_column],
+                            )
+                            + "\n"
+                        )
+                    formatted_few_shot_prompt += (
+                        "Now answer the following question in the same format:\n\n"
+                    )
+                else:
+                    for inst in few_shot_data:
+                        formatted_few_shot_prompt += (
+                            prompt.format(
+                                question=inst[x_column].strip(),
+                                answer=inst[y_column],
+                            )
+                            + "\n"
+                        )
             for inst in dataset:
                 x.append(
                     formatted_few_shot_prompt
