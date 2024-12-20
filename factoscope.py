@@ -641,9 +641,9 @@ class LLMFactoscopeAll(Estimator):
                 else:
                     y_ = y
                 if self.metric_name == "Accuracy":
-                    metrics.append([self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0]]*len(x_t))
+                    metrics.append([self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_])[0]]*len(x_t))
                 else:
-                    metrics.append([int(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0] > self.metric_thr)]*len(x_t))
+                    metrics.append([int(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_])[0] > self.metric_thr)]*len(x_t))
             self.token_metrics = np.concatenate(metrics)
             
             #n_instances, n_layers

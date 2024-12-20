@@ -510,7 +510,7 @@ def get_density_based_ue_methods(args, model_type):
                             ]
     
                 for metric, metric_name in zip(metrics, metrics_names):
-                    if proxy_model in ["roberta-base", "roberta-large"]:
+                    if proxy_model in ["roberta-base"]:
                         estimators += [TransformerUQ(model_name=proxy_model, metric=metric, metric_name=metric_name)]
                     for thr in metric_thrs:
                         for sim_pca in [True, False]:
@@ -601,7 +601,7 @@ def get_density_based_ue_methods(args, model_type):
                 #layer-wise methods
                 for layer in layers:
                     for metric, metric_name in zip(metrics, metrics_names):
-                        # estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
+                        estimators += [SAPLMA("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, cv_hp=True)]
                         for thr in metric_thrs:
                             estimators += [ 
                                 TokenMahalanobisDistance("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layer, metric_thr=thr, storage_device=getattr(args, "clean_md_device", "cpu"), is_proxy_model=False),
@@ -612,7 +612,7 @@ def get_density_based_ue_methods(args, model_type):
                     # estimators += [SAPLMA_meta("decoder", parameters_path=None, metric=metric, metric_name=metric_name, aggregated=getattr(args, "multiref", False), hidden_layer=layers, device="cuda", cv_hp=True)]
                     for thr in metric_thrs:
                         estimators += [
-                #                     # LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
+                                    LLMFactoscopeAll(metric=metric, metric_name=metric_name, metric_thr=thr, hidden_layers=layers, return_dist=True, return_new_dist=True),
                                     
                 #                     ####################### satrmd
                                     LinRegTokenMahalanobisDistance("decoder", parameters_path=None, 

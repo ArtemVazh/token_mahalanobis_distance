@@ -94,7 +94,7 @@ class SAPLMA_meta(Estimator):
                         y_ = [y]
                     else:
                         y_ = y
-                    metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_], [y_])[0])
+                    metrics.append(self.metric({"greedy_texts": [x], "target_texts": [y_]}, [y_])[0])
                 self.train_seq_metrics = np.array(metrics)
                 stats[metric_key] = self.train_seq_metrics
             self.train_seq_metrics[np.isnan(self.train_seq_metrics)] = 0
