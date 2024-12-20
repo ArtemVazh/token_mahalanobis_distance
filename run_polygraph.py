@@ -484,7 +484,6 @@ def get_density_based_ue_methods(args, model_type):
             process_target_fn = load_process_fn(process_target_fn)
     
             metrics = [PreprocessOutputTarget(metric, process_output_fn, process_target_fn) for metric in metrics]
-            print("PreprocessOutputTarget")
     
         if getattr(args, 'parameters_path', False):
             parameters_path = args.parameters_path
