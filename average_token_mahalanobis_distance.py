@@ -203,6 +203,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
         proxy_model_name: str = "bert-base-uncased",
 
         sim_pca: bool = False,
+        n_components: int = 10,
         
     ):
         self.ue = ue
@@ -252,12 +253,13 @@ class LinRegTokenMahalanobisDistance(Estimator):
         self.tgt_norm=tgt_norm
         self.remove_corr=remove_corr
         self.remove_alg=remove_alg
+        self.n_components = n_components
     
     def __str__(self):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         positive = "pos" if self.positive else ""
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
-        remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
+        remove_corr = f"remove_corr_{self.remove_alg}_{self.n_components}_comp" if self.remove_corr else ""
         return f"{self.meta_model}{self.ue}Distance_{self.proxy}{self.embeddings_type}{hidden_layers} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr}{self.sim_pca_name})"
 
     def __call__(self, stats: Dict[str, np.ndarray]) -> np.ndarray:
@@ -447,7 +449,7 @@ class LinRegTokenMahalanobisDistance(Estimator):
                         X = X @ self.L @ self.v.T[:, :10]
                         
                     else:
-                        self.pca = PCA(n_components=10)
+                        self.pca = PCA(n_components=self.n_components)
                         X = self.pca.fit_transform(X)
                     
                 if self.remove_alg == 4:

@@ -151,6 +151,7 @@ class HUQ_LRTMD(Estimator):
         proxy_model_name: str = "bert-base-uncased",
 
         sim_pca: bool = False,
+        n_components: int = 10,
         
     ):
         self.ue = ue
@@ -195,10 +196,11 @@ class HUQ_LRTMD(Estimator):
         self.tgt_norm=tgt_norm
         self.remove_corr=remove_corr
         self.remove_alg=remove_alg
+        self.n_components = n_components
         self.md = LinRegTokenMahalanobisDistance(embeddings_type, parameters_path=parameters_path, metric=metric, metric_name=metric_name, 
                                                  metric_md=metric, metric_md_name=metric_name, aggregated=aggregated, 
                                                  hidden_layers=hidden_layers, metric_thr=metric_thr, aggregation=aggregation,
-                                                 ue=ue, positive=positive, meta_model=meta_model, norm=norm, 
+                                                 ue=ue, positive=positive, meta_model=meta_model, norm=norm, n_components=n_components,
                                                  remove_corr=remove_corr, remove_alg=remove_alg, device=device, storage_device=storage_device, is_proxy_model=is_proxy_model, proxy_model_name=proxy_model_name, sim_pca=sim_pca)
         self.msp = MaximumSequenceProbability()
         self.use_tad=use_tad
@@ -207,7 +209,7 @@ class HUQ_LRTMD(Estimator):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         positive = "pos" if self.positive else ""
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
-        remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
+        remove_corr = f"remove_corr_{self.remove_alg}_{self.n_components}_comp" if self.remove_corr else ""
         use_tad = f"+tad" if self.use_tad else ""
         return f"HUQ-{self.meta_model}{self.ue}Distance_{self.proxy}{self.embeddings_type}{hidden_layers}{use_tad} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr}{self.sim_pca_name})"
 

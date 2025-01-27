@@ -238,6 +238,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
         proxy_model_name: str = "bert-base-uncased",
 
         sim_pca: bool = False,
+        n_components: int = 10,
     ):
         self.ue = ue
         self.hidden_layers = hidden_layers
@@ -247,6 +248,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
         self.is_proxy_model = is_proxy_model
         self.proxy = f"proxy_{NAMING_MAP[proxy_model_name]}_" if self.is_proxy_model else ""
 
+        self.n_components = n_components
         self.sim_pca = sim_pca
         self.sim_pca_name = f", sim_pca" if self.sim_pca else ""
 
@@ -298,7 +300,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
         hidden_layers = ",".join([str(x) for x in self.hidden_layers])
         positive = "pos" if self.positive else ""
         tgt_norm = "tgt_norm" if self.tgt_norm else ""
-        remove_corr = f"remove_corr_{self.remove_alg}" if self.remove_corr else ""
+        remove_corr = f"remove_corr_{self.remove_alg}_{self.n_components}_comp" if self.remove_corr else ""
         use_tad = f"+tad" if self.use_tad else ""
         return f"Hybrid{self.meta_model}{self.ue}Distance_{self.proxy}{self.embeddings_type}{hidden_layers}{use_tad} ({self.aggregation}, {self.metric_name}, {self.metric_md_name}, {self.metric_thr}, {positive}, {self.norm}, {tgt_norm}, {remove_corr}{self.sim_pca_name})"
 
@@ -493,7 +495,7 @@ class LinRegTokenMahalanobisDistance_Hybrid(Estimator):
                         X = X @ self.L @ self.v.T[:, :10]
                         
                     else:
-                        self.pca = PCA(n_components=10)
+                        self.pca = PCA(n_components=self.n_components)
                         X = self.pca.fit_transform(X)
                     
                 if self.remove_alg == 4:
