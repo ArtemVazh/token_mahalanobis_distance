@@ -2,7 +2,7 @@
 
 This repository contains the implementation of token-level density-based methods for Uncertainty Quantification (UQ) for selective text generation tasks using LLMs.
 
-Namely, the repository contains code for reproducing experiments from the paper "Token-Level Density-Based Uncertainty Quantification Methods for Eliciting Truthfulness of Large Language Models" at the NAACL-2025 conference.
+Namely, the repository contains code for reproducing experiments from the paper ["Token-Level Density-Based Uncertainty Quantification Methods for Eliciting Truthfulness of Large Language Models"](https://arxiv.org/pdf/2502.14427) at the NAACL-2025 conference.
 
 ## What the paper is about?
 
