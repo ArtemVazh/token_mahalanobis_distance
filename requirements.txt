@@ -1,2 +1,2 @@
-lm-polygraph @ git+https://github.com/ArtemVazh/lm-polygraph.git
+lm-polygraph @ git+https://github.com/ArtemVazh/lm-polygraph.git@333b26a396d6fe4b91f3263f35a64ded261a19f4
 optuna
