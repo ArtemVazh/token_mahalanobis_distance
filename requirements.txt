@@ -1,2 +1,3 @@
-lm-polygraph @ git+https://github.com/ArtemVazh/lm-polygraph.git@333b26a396d6fe4b91f3263f35a64ded261a19f4
+lm-polygraph @ git+https://github.com/ArtemVazh/lm-polygraph.git@38a5202baf613a8b3b058d007d396b121a5bbfb5
 optuna
+torchvision
