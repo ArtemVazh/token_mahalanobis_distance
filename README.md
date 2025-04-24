@@ -61,9 +61,6 @@ cd scripts
 bash fact_checking.sh
 ```
 
-
-### Methods
-
 ## Citation
 ```
 @article{vazhentsev2025token,
