@@ -63,10 +63,26 @@ bash fact_checking.sh
 
 ## Citation
 ```
-@article{vazhentsev2025token,
-  title={Token-Level Density-Based Uncertainty Quantification Methods for Eliciting Truthfulness of Large Language Models},
-  author={Vazhentsev, Artem and Rvanova, Lyudmila and Lazichny, Ivan and Panchenko, Alexander and Panov, Maxim and Baldwin, Timothy and Shelmanov, Artem},
-  journal={arXiv preprint arXiv:2502.14427},
-  year={2025}
+@inproceedings{vazhentsev-etal-2025-token,
+    title = "Token-Level Density-Based Uncertainty Quantification Methods for Eliciting Truthfulness of Large Language Models",
+    author = "Vazhentsev, Artem  and
+      Rvanova, Lyudmila  and
+      Lazichny, Ivan  and
+      Panchenko, Alexander  and
+      Panov, Maxim  and
+      Baldwin, Timothy  and
+      Shelmanov, Artem",
+    editor = "Chiruzzo, Luis  and
+      Ritter, Alan  and
+      Wang, Lu",
+    booktitle = "Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)",
+    month = apr,
+    year = "2025",
+    address = "Albuquerque, New Mexico",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2025.naacl-long.113/",
+    pages = "2246--2262",
+    ISBN = "979-8-89176-189-6",
+    abstract = "Uncertainty quantification (UQ) is a prominent approach for eliciting truthful answers from large language models (LLMs). To date, information-based and consistency-based UQ have been the dominant UQ methods for text generation via LLMs. Density-based methods, despite being very effective for UQ in text classification with encoder-based models, have not been very successful with generative LLMs. In this work, we adapt Mahalanobis Distance (MD) {--} a well-established UQ technique in classification tasks {--} for text generation and introduce a new supervised UQ method. Our method extracts token embeddings from multiple layers of LLMs, computes MD scores for each token, and uses linear regression trained on these features to provide robust uncertainty scores. Through extensive experiments on eleven datasets, we demonstrate that our approach substantially improves over existing UQ methods, providing accurate and computationally efficient uncertainty scores for both sequence-level selective generation and claim-level fact-checking tasks. Our method also exhibits strong generalization to out-of-domain data, making it suitable for a wide range of LLM-based applications."
 }
 ```
