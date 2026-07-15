@@ -93,7 +93,7 @@ def grid_search_hp(
                 )
                 new_prr = target_metric(unc, metrics)
                 if new_prr > best_prr:
-                    new_prr = new_prr
+                    best_prr = new_prr
                     t_min_best = t_min
                     t_max_best = t_max
                     alpha_best = alpha
